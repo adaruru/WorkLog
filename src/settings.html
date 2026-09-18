@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-TW" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorkLog</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <nav class="tabs">
+        <button class="tab active" data-panel="general" data-i18n="tab.general"></button>
+        <button class="tab" data-panel="users" data-i18n="tab.users"></button>
+        <button class="tab" data-panel="statuses" data-i18n="tab.statuses"></button>
+        <button class="tab" data-panel="calendar" data-i18n="tab.calendar"></button>
+        <button class="tab" data-panel="sprint" data-i18n="tab.sprint"></button>
+        <button class="tab" data-panel="data" data-i18n="tab.data"></button>
+      </nav>
+
+      <section class="panel active" id="panel-general">
+        <div>
+          <label class="label" for="language" data-i18n="general.language"></label>
+          <select class="input" id="language">
+            <option value="zh-TW">繁體中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" for="theme" data-i18n="general.theme"></label>
+          <select class="input" id="theme"></select>
+        </div>
+        <div>
+          <label class="label" for="reminderRange" data-i18n="general.reminder"></label>
+          <select class="input" id="reminderRange"></select>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-users">
+        <div class="table" id="userTable"></div>
+        <div class="actions">
+          <input class="input" id="newUserName" data-i18n-placeholder="users.name" />
+          <input class="input num" type="number" id="newUserHours" step="0.5" min="0" value="8" />
+          <button class="btn primary" id="addUser" data-i18n="users.add"></button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-statuses">
+        <div>
+          <label class="label" for="defaultStatus" data-i18n="statuses.default"></label>
+          <select class="input" id="defaultStatus"></select>
+        </div>
+        <div class="table" id="statusTable"></div>
+        <div class="actions">
+          <input class="input" id="newStatusName" data-i18n-placeholder="statuses.name" />
+          <input class="input" type="color" id="newStatusColor" value="#5b8cff" />
+          <button class="btn primary" id="addStatus" data-i18n="statuses.add"></button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-calendar">
+        <div class="section">
+          <div class="section-head"><span data-i18n="calendar.holidays"></span></div>
+          <div class="section-body">
+            <div class="table" id="holidayTable"></div>
+            <div class="actions">
+              <input class="input" type="date" id="newHolidayDate" />
+              <input class="input" id="newHolidayName" data-i18n-placeholder="calendar.name" />
+              <button class="btn" id="addHoliday" data-i18n="calendar.addHoliday"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head"><span data-i18n="calendar.leaves"></span></div>
+          <div class="section-body">
+            <div class="table" id="leaveTable"></div>
+            <div class="actions">
+              <select class="input" id="newLeaveUser"></select>
+              <input class="input" type="date" id="newLeaveDate" />
+              <input class="input num" type="number" id="newLeaveHours" step="0.5" min="0" value="8" />
+              <button class="btn" id="addLeave" data-i18n="calendar.addLeave"></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-sprint">
+        <div class="hint" data-i18n="sprint.hint"></div>
+        <div>
+          <label class="label" for="sprintNumber" data-i18n="sprint.anchorNumber"></label>
+          <input class="input num" type="number" id="sprintNumber" />
+        </div>
+        <div>
+          <label class="label" for="sprintStart" data-i18n="sprint.anchorStart"></label>
+          <input class="input" type="date" id="sprintStart" />
+        </div>
+        <div>
+          <label class="label" for="sprintLength" data-i18n="sprint.lengthDays"></label>
+          <input class="input num" type="number" id="sprintLength" min="1" value="14" />
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="saveSprint" data-i18n="btn.save"></button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-data">
+        <div class="hint" data-i18n="data.hint"></div>
+        <div>
+          <label class="label" for="dbPath" data-i18n="data.path"></label>
+          <input class="input" id="dbPath" />
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="changeDb" data-i18n="data.change"></button>
+          <button class="btn" id="revealDb" data-i18n="data.reveal"></button>
+        </div>
+      </section>
+    </div>
+
+    <dialog id="statusDeleteDialog">
+      <div class="dialog-head" data-i18n="statuses.deleteTitle"></div>
+      <div class="dialog-body">
+        <label class="label" data-i18n="statuses.replacement"></label>
+        <select class="input" id="replacementStatus"></select>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn" id="statusDeleteCancel" data-i18n="btn.cancel"></button>
+        <button class="btn danger" id="statusDeleteConfirm" data-i18n="btn.delete"></button>
+      </div>
+    </dialog>
+
+    <script src="i18n.js"></script>
+    <script src="api.js"></script>
+    <script src="settings.js"></script>
+  </body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-TW" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorkLog</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="toolbar">
+        <input class="field search" id="keyword" data-i18n-placeholder="search.placeholder" />
+        <select class="field compact" id="rangeScope"></select>
+        <input type="date" class="field date" id="dateFrom" />
+        <span class="sep">–</span>
+        <input type="date" class="field date" id="dateTo" />
+        <button class="btn" id="statusFilterBtn"></button>
+        <select class="field compact" id="userFilter"></select>
+        <span class="spacer"></span>
+        <span class="badge" id="hoursBadge"></span>
+        <button class="btn primary" id="newBtn" data-i18n="btn.new"></button>
+        <button class="btn icon" id="settingsBtn" data-i18n-title="btn.settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.4.67.75.88H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </header>
+
+      <div class="body">
+        <section class="list-pane">
+          <div class="pane-head"><span id="listCount"></span></div>
+          <div class="list" id="list"></div>
+        </section>
+
+        <div class="splitter" id="splitter"></div>
+
+        <section class="detail-pane">
+          <div class="empty" id="detailEmpty">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <path d="M14 2v6h6"></path>
+            </svg>
+            <span data-i18n="empty.detail"></span>
+          </div>
+
+          <div class="detail-form" id="detailForm" hidden>
+            <div>
+              <label class="label" for="fTitle" data-i18n="detail.title"></label>
+              <input class="input" id="fTitle" />
+            </div>
+
+            <div class="grid-2">
+              <div>
+                <label class="label" for="fTicket" data-i18n="detail.ticket"></label>
+                <input class="input" id="fTicket" />
+              </div>
+              <div>
+                <label class="label" for="fWorkDate" data-i18n="detail.workDate"></label>
+                <input class="input" type="date" id="fWorkDate" />
+              </div>
+              <div>
+                <label class="label" for="fStatus" data-i18n="detail.status"></label>
+                <select class="input" id="fStatus"></select>
+              </div>
+              <div>
+                <label class="label" for="fHours" data-i18n="detail.hours"></label>
+                <input class="input num" type="number" id="fHours" step="0.5" min="0" />
+              </div>
+              <div>
+                <label class="label" for="fUser" data-i18n="detail.user"></label>
+                <select class="input" id="fUser"></select>
+              </div>
+            </div>
+
+            <div>
+              <label class="label" for="fContent" data-i18n="detail.content"></label>
+              <textarea class="input" id="fContent"></textarea>
+            </div>
+
+            <div class="actions">
+              <button class="btn primary" id="saveBtn" data-i18n="btn.save"></button>
+              <button class="btn danger" id="deleteBtn" data-i18n="btn.delete"></button>
+            </div>
+
+            <div class="section">
+              <div class="section-head">
+                <span data-i18n="links.out"></span>
+                <span class="spacer"></span>
+                <button class="btn tiny" id="addLinkBtn" data-i18n="btn.link"></button>
+              </div>
+              <div class="section-body" id="linksOut"></div>
+            </div>
+
+            <div class="section">
+              <div class="section-head"><span data-i18n="links.in"></span></div>
+              <div class="section-body" id="linksIn"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <dialog id="statusDialog">
+      <div class="dialog-head" data-i18n="filter.status"></div>
+      <div class="dialog-body checks" id="statusChecks"></div>
+      <div class="dialog-foot">
+        <button class="btn" id="statusDialogClose" data-i18n="btn.close"></button>
+      </div>
+    </dialog>
+
+    <dialog id="linkDialog">
+      <div class="dialog-head" data-i18n="links.picker"></div>
+      <div class="dialog-body">
+        <input class="input" id="linkSearch" data-i18n-placeholder="links.search" />
+        <div id="linkCandidates"></div>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn" id="linkDialogClose" data-i18n="btn.close"></button>
+      </div>
+    </dialog>
+
+    <script src="i18n.js"></script>
+    <script src="api.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

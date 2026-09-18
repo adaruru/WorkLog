@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"WorkLog 主視窗與設定視窗的預設權限","local":true,"windows":["main","settings"],"permissions":["core:default"]}}
