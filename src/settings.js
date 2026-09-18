@@ -7,12 +7,13 @@ const state = {
 
 const THEMES = ['dark', 'light', 'blue'];
 const REMINDER_SCOPES = ['today', 'week', 'sprint'];
+const DENSITIES = ['compact', 'cozy', 'comfortable'];
 
 const dom = {};
 
 function cache() {
   const ids = [
-    'language', 'theme', 'reminderRange',
+    'language', 'theme', 'density', 'reminderRange',
     'userTable', 'newUserName', 'newUserHours', 'addUser',
     'defaultStatus', 'statusTable', 'newStatusName', 'newStatusColor', 'addStatus',
     'holidayTable', 'newHolidayDate', 'newHolidayName', 'newHolidayWorkday', 'addHoliday',
@@ -49,6 +50,12 @@ function fillOptions(select, values, labeller, current) {
 function renderGeneral() {
   dom.language.value = state.settings.language || 'zh-TW';
   fillOptions(dom.theme, THEMES, (value) => I18N.t(`theme.${value}`), state.settings.theme || 'dark');
+  fillOptions(
+    dom.density,
+    DENSITIES,
+    (value) => I18N.t(`density.${value}`),
+    state.settings.density || 'cozy'
+  );
   fillOptions(
     dom.reminderRange,
     REMINDER_SCOPES,
@@ -347,6 +354,11 @@ function bind() {
     await reload();
   });
 
+  dom.density.addEventListener('change', async () => {
+    await UI.guard(() => API.setSetting('density', dom.density.value));
+    await reload();
+  });
+
   dom.reminderRange.addEventListener('change', async () => {
     await UI.guard(() => API.setSetting('reminder_range', dom.reminderRange.value));
     await reload();
@@ -448,6 +460,7 @@ async function reload() {
 
   I18N.set(state.settings.language || 'zh-TW');
   UI.applyTheme(state.settings.theme || 'dark');
+  UI.applyDensity(state.settings.density);
   I18N.apply();
 
   renderGeneral();

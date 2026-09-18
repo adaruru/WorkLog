@@ -160,6 +160,7 @@ src-tauri/target/debug/worklog.db
 - **`command not found` 之類的 invoke 錯誤** — `main.rs` 的 `invoke_handler!` 清單漏加。
 - **改了 command 參數名，前端傳過去卻收到 null** — Tauri 會把前端的 camelCase 參數名轉成 Rust 的 snake_case，但**只對 command 的參數生效**。傳進去的物件（像 `EntryQuery`、`EntryInput`）內部欄位要自己寫 snake_case。
 - **`` error: failed to remove file `target\debug\worklog.exe` ``** — 上一個 app 實例還活著，鎖住了執行檔。結束它：`Stop-Process -Name worklog -Force`。正式版關掉視窗只會縮到系統匣、程式不會結束，就是這個原因；debug build 已經改成關掉視窗即結束，所以開發時通常不會遇到。
+- **系統的全域熱鍵在 app 有焦點時失效（例如截圖工具的 F1）** — WebView2 預設把 F1、F3、F5、F7、Ctrl+F、Ctrl+P 當成瀏覽器快捷鍵吃掉。`main.rs` 的 `release_browser_hotkeys` 已在視窗建立後關閉 `AreBrowserAcceleratorKeysEnabled`；若之後改動了視窗建立流程導致這段沒被呼叫，症狀就會回來。
 - **資料庫顯示 locked** — 同時開了兩個 app 實例，或 DB Browser 正壓著沒存檔的變更。關掉其中一邊。
 
 ## 5. 測試

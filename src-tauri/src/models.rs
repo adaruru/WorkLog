@@ -80,6 +80,8 @@ pub struct EntryQuery {
     pub status_ids: Vec<i64>,
     pub user_filter: UserFilter,
     pub user_id: Option<i64>,
+    pub sort_field: String,
+    pub sort_dir: String,
 }
 
 impl Default for EntryQuery {
@@ -91,6 +93,8 @@ impl Default for EntryQuery {
             status_ids: Vec::new(),
             user_filter: UserFilter::Any,
             user_id: None,
+            sort_field: "work_date".to_string(),
+            sort_dir: "desc".to_string(),
         }
     }
 }

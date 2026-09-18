@@ -111,12 +111,13 @@ fn seed(conn: &Connection) -> Result<()> {
     let default_status_id: i64 =
         conn.query_row("SELECT id FROM statuses WHERE name = 'new'", [], |row| row.get(0))?;
 
-    let defaults: [(&str, String); 5] = [
+    let defaults: [(&str, String); 6] = [
         ("default_status_id", default_status_id.to_string()),
         ("sprint_length_days", "14".to_string()),
         ("reminder_range", "week".to_string()),
         ("language", "zh-TW".to_string()),
         ("theme", "dark".to_string()),
+        ("density", "cozy".to_string()),
     ];
     for (key, value) in defaults {
         conn.execute(

@@ -4,9 +4,11 @@ const state = {
   statuses: [],
   entries: [],
   selectedId: null,
+  editingId: null,
   statusFilter: new Set(),
   scope: 'week',
-  draftId: null
+  sortField: 'work_date',
+  sortDir: 'desc'
 };
 
 const SCOPES = ['today', 'week', 'month', 'sprint', 'last_sprint', 'custom'];
@@ -16,9 +18,8 @@ const dom = {};
 function cache() {
   const ids = [
     'keyword', 'rangeScope', 'dateFrom', 'dateTo', 'statusFilterBtn', 'userFilter',
-    'hoursBadge', 'newBtn', 'settingsBtn', 'listCount', 'list', 'detailEmpty', 'detailForm',
-    'fTitle', 'fTicket', 'fWorkDate', 'fStatus', 'fHours', 'fUser', 'fContent',
-    'saveBtn', 'deleteBtn', 'addLinkBtn', 'linksRelated',
+    'hoursBadge', 'settingsBtn', 'listCount', 'listHead', 'list', 'detailEmpty', 'detailForm',
+    'fContent', 'addLinkBtn', 'linksRelated',
     'statusDialog', 'statusChecks', 'statusDialogClose',
     'linkDialog', 'linkSearch', 'linkCandidates', 'linkDialogClose',
     'splitter'
@@ -49,63 +50,51 @@ function currentQuery() {
     date_to: dom.dateTo.value,
     status_ids: [...state.statusFilter],
     user_filter: value === 'any' ? 'any' : value === 'unowned' ? 'unowned' : 'one',
-    user_id: selectedUserId()
+    user_id: selectedUserId(),
+    sort_field: state.sortField,
+    sort_dir: state.sortDir
   };
+}
+
+function option(value, label) {
+  const node = document.createElement('option');
+  node.value = value;
+  node.textContent = label;
+  return node;
 }
 
 function fillScopeSelect() {
   UI.clear(dom.rangeScope);
-  SCOPES.forEach((scope) => {
-    const option = document.createElement('option');
-    option.value = scope;
-    option.textContent = I18N.t(`range.${scope}`);
-    dom.rangeScope.appendChild(option);
-  });
+  SCOPES.forEach((scope) => dom.rangeScope.appendChild(option(scope, I18N.t(`range.${scope}`))));
   dom.rangeScope.value = state.scope;
 }
 
 function fillUserSelects() {
   const keep = dom.userFilter.value;
   UI.clear(dom.userFilter);
-  const any = document.createElement('option');
-  any.value = 'any';
-  any.textContent = I18N.t('filter.allUsers');
-  dom.userFilter.appendChild(any);
-  state.users.forEach((user) => {
-    const option = document.createElement('option');
-    option.value = String(user.id);
-    option.textContent = user.name;
-    dom.userFilter.appendChild(option);
-  });
-  const unowned = document.createElement('option');
-  unowned.value = 'unowned';
-  unowned.textContent = I18N.t('filter.unowned');
-  dom.userFilter.appendChild(unowned);
+  dom.userFilter.appendChild(option('any', I18N.t('filter.allUsers')));
+  state.users.forEach((user) => dom.userFilter.appendChild(option(String(user.id), user.name)));
+  dom.userFilter.appendChild(option('unowned', I18N.t('filter.unowned')));
   if (keep) {
     dom.userFilter.value = keep;
   }
-
-  UI.clear(dom.fUser);
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = I18N.t('detail.unowned');
-  dom.fUser.appendChild(none);
-  state.users.forEach((user) => {
-    const option = document.createElement('option');
-    option.value = String(user.id);
-    option.textContent = user.name;
-    dom.fUser.appendChild(option);
-  });
 }
 
-function fillStatusSelect(select) {
-  UI.clear(select);
-  state.statuses.forEach((status) => {
-    const option = document.createElement('option');
-    option.value = String(status.id);
-    option.textContent = status.name;
-    select.appendChild(option);
-  });
+function statusSelect(className, statusId) {
+  const select = document.createElement('select');
+  select.className = className;
+  state.statuses.forEach((status) => select.appendChild(option(String(status.id), status.name)));
+  select.value = String(statusId);
+  return select;
+}
+
+function userSelect(className, userId) {
+  const select = document.createElement('select');
+  select.className = className;
+  select.appendChild(option('', I18N.t('detail.unowned')));
+  state.users.forEach((user) => select.appendChild(option(String(user.id), user.name)));
+  select.value = userId === null || userId === undefined ? '' : String(userId);
+  return select;
 }
 
 function renderStatusFilterButton() {
@@ -137,57 +126,226 @@ function renderStatusChecks() {
   });
 }
 
+function field(className, value, type) {
+  const node = document.createElement('input');
+  node.className = className;
+  if (type) {
+    node.type = type;
+  }
+  node.value = value ?? '';
+  return node;
+}
+
+function buildEditRow(entry) {
+  const row = UI.el('div', 'row selected editing');
+  row.dataset.id = String(entry.id);
+
+  const ticket = field('c-ticket edit-cell', entry.ticket);
+  ticket.placeholder = I18N.t('detail.ticket');
+  const title = field('c-title edit-cell', entry.title);
+  title.placeholder = I18N.t('detail.title');
+  const hours = field('c-hours edit-cell', entry.hours, 'number');
+  hours.step = '0.5';
+  hours.min = '0';
+  const status = statusSelect('c-status edit-cell', entry.status_id);
+  const date = field('c-date edit-cell', entry.work_date, 'date');
+  const user = userSelect('c-user edit-cell', entry.user_id);
+
+  const remove = UI.el('button', 'c-remove', '✕');
+  remove.title = I18N.t('btn.delete');
+  remove.addEventListener('click', (event) => {
+    event.stopPropagation();
+    removeEntry(entry.id);
+  });
+
+  row.appendChild(ticket);
+  row.appendChild(title);
+  row.appendChild(hours);
+  row.appendChild(UI.dot(entry.status_color));
+  row.appendChild(status);
+  row.appendChild(date);
+  row.appendChild(user);
+  row.appendChild(remove);
+
+  [ticket, title, hours, status, date, user].forEach((node) => {
+    node.addEventListener('change', () => saveSelected());
+  });
+
+  row.addEventListener('click', (event) => event.stopPropagation());
+  return row;
+}
+
+function buildDisplayRow(entry) {
+  const row = UI.el('div', 'row');
+  row.dataset.id = String(entry.id);
+  if (entry.id === state.selectedId) {
+    row.classList.add('selected');
+  }
+
+  row.appendChild(UI.el('span', 'c-ticket', entry.ticket));
+  row.appendChild(UI.el('span', 'c-title', entry.title));
+  row.appendChild(UI.el('span', 'c-hours', UI.hours(entry.hours)));
+  row.appendChild(UI.dot(entry.status_color));
+
+  const status = statusSelect('c-status', entry.status_id);
+  status.addEventListener('click', (event) => event.stopPropagation());
+  status.addEventListener('change', async (event) => {
+    event.stopPropagation();
+    await UI.guard(() => API.setEntryStatus(entry.id, Number(status.value)));
+    await refresh();
+  });
+  row.appendChild(status);
+
+  row.appendChild(UI.el('span', 'c-date num', entry.work_date));
+  row.appendChild(UI.el('span', 'c-user', entry.user_name ?? ''));
+  row.appendChild(UI.el('span', 'c-remove-spacer'));
+
+  row.addEventListener('click', (event) => {
+    event.stopPropagation();
+    select(entry.id);
+  });
+  return row;
+}
+
+const DEFAULT_COLUMNS = { ticket: 56, hours: 40, status: 68, date: 94, user: 68 };
+const COLUMN_LIMITS = { min: 32, max: 220 };
+
+function applyColumns(columns) {
+  const merged = { ...DEFAULT_COLUMNS, ...(columns || {}) };
+  Object.entries(merged).forEach(([name, width]) => {
+    const value = Math.min(Math.max(Number(width) || DEFAULT_COLUMNS[name], COLUMN_LIMITS.min), COLUMN_LIMITS.max);
+    document.documentElement.style.setProperty(`--w-${name}`, `${value}px`);
+  });
+}
+
+function readColumn(name) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(`--w-${name}`);
+  return parseFloat(raw) || DEFAULT_COLUMNS[name];
+}
+
+async function saveColumns() {
+  const layout = parseJson(state.settings.window_layout, {});
+  layout.columns = Object.fromEntries(
+    Object.keys(DEFAULT_COLUMNS).map((name) => [name, readColumn(name)])
+  );
+  state.settings.window_layout = JSON.stringify(layout);
+  await UI.guard(() => API.setSetting('window_layout', state.settings.window_layout));
+}
+
+function columnHandle(name) {
+  const handle = UI.el('span', 'col-resize');
+  handle.title = I18N.t('sort.resize');
+  handle.addEventListener('click', (event) => event.stopPropagation());
+  handle.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handle.classList.add('dragging');
+
+    const startX = event.clientX;
+    const startWidth = readColumn(name);
+
+    const move = (moveEvent) => {
+      const next = startWidth + (moveEvent.clientX - startX);
+      applyColumns({ [name]: next });
+    };
+    const up = async () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      handle.classList.remove('dragging');
+      await saveColumns();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  });
+  return handle;
+}
+
+const SORT_COLUMNS = [
+  { field: 'ticket', label: 'detail.ticket', cell: 'c-ticket', first: 'desc', resize: 'ticket' },
+  { field: 'title', label: 'detail.title', cell: 'c-title', first: 'asc' },
+  { field: 'hours', label: 'detail.hours', cell: 'c-hours', first: 'desc', resize: 'hours' },
+  { field: 'status', label: 'detail.status', cell: 'c-status', first: 'asc', resize: 'status' },
+  { field: 'work_date', label: 'detail.workDate', cell: 'c-date', first: 'desc', resize: 'date' },
+  { field: 'user', label: 'detail.user', cell: 'c-user', first: 'asc', resize: 'user' }
+];
+
+function sortButton(column) {
+  const button = UI.el('button', `sort-cell ${column.cell}`);
+  button.appendChild(UI.el('span', 'sort-label', I18N.t(column.label)));
+
+  const active = state.sortField === column.field;
+  button.appendChild(
+    UI.el('span', 'sort-arrow', active ? (state.sortDir === 'asc' ? '▲' : '▼') : '')
+  );
+  if (active) {
+    button.classList.add('active');
+  }
+  button.title = I18N.t('sort.hint');
+
+  button.addEventListener('click', async () => {
+    if (state.sortField === column.field) {
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortField = column.field;
+      state.sortDir = column.first;
+    }
+    await refresh();
+  });
+
+  if (column.resize) {
+    button.appendChild(columnHandle(column.resize));
+  }
+  return button;
+}
+
+function renderHead() {
+  UI.clear(dom.listHead);
+  const [ticket, title, hours, status, workDate, user] = SORT_COLUMNS;
+
+  dom.listHead.appendChild(sortButton(ticket));
+  dom.listHead.appendChild(sortButton(title));
+  dom.listHead.appendChild(sortButton(hours));
+  dom.listHead.appendChild(UI.el('span', 'dot-spacer'));
+  dom.listHead.appendChild(sortButton(status));
+  dom.listHead.appendChild(sortButton(workDate));
+  dom.listHead.appendChild(sortButton(user));
+  dom.listHead.appendChild(UI.el('span', 'c-remove-spacer'));
+}
+
 function renderList() {
+  renderHead();
   UI.clear(dom.list);
   dom.listCount.textContent = I18N.t('list.count', { n: state.entries.length });
 
   if (state.entries.length === 0) {
+    UI.clear(dom.list);
     const empty = UI.el('div', 'empty');
     empty.appendChild(UI.el('span', null, I18N.t('empty.list')));
     dom.list.appendChild(empty);
+    dom.list.appendChild(buildAddButton());
     return;
   }
 
   state.entries.forEach((entry) => {
-    const row = UI.el('div', 'row');
-    row.dataset.id = String(entry.id);
-    if (entry.id === state.selectedId) {
-      row.classList.add('selected');
-    }
-
-    row.appendChild(UI.el('div', 'row-ticket', entry.ticket));
-    row.appendChild(UI.el('div', 'row-title', entry.title));
-    row.appendChild(UI.el('div', 'row-hours', `${UI.hours(entry.hours)}h`));
-
-    const meta = UI.el('div', 'row-meta');
-    meta.appendChild(UI.dot(entry.status_color));
-
-    const statusSelect = document.createElement('select');
-    statusSelect.className = 'row-status';
-    state.statuses.forEach((status) => {
-      const option = document.createElement('option');
-      option.value = String(status.id);
-      option.textContent = status.name;
-      statusSelect.appendChild(option);
-    });
-    statusSelect.value = String(entry.status_id);
-    statusSelect.addEventListener('click', (event) => event.stopPropagation());
-    statusSelect.addEventListener('change', async (event) => {
-      event.stopPropagation();
-      await UI.guard(() => API.setEntryStatus(entry.id, Number(statusSelect.value)));
-      await refresh();
-    });
-    meta.appendChild(statusSelect);
-
-    meta.appendChild(UI.el('span', 'num', entry.work_date));
-    if (entry.user_name) {
-      meta.appendChild(UI.el('span', null, entry.user_name));
-    }
-    row.appendChild(meta);
-
-    row.addEventListener('click', () => select(entry.id));
-    dom.list.appendChild(row);
+    dom.list.appendChild(
+      entry.id === state.editingId ? buildEditRow(entry) : buildDisplayRow(entry)
+    );
   });
+
+  dom.list.appendChild(buildAddButton());
+}
+
+function buildAddButton() {
+  const wrap = UI.el('div', 'add-row');
+  const button = UI.el('button', 'add-box', '＋');
+  button.title = I18N.t('quick.add');
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    createEntry('');
+    button.focus();
+  });
+  wrap.appendChild(button);
+  return wrap;
 }
 
 function renderLinks(items) {
@@ -233,19 +391,63 @@ async function loadDetail(id) {
     showForm(false);
     return;
   }
-
-  const entry = detail.entry;
-  dom.fTitle.value = entry.title;
-  dom.fTicket.value = entry.ticket;
-  dom.fWorkDate.value = entry.work_date;
-  dom.fHours.value = entry.hours;
-  dom.fContent.value = entry.content;
-  fillStatusSelect(dom.fStatus);
-  dom.fStatus.value = String(entry.status_id);
-  dom.fUser.value = entry.user_id === null ? '' : String(entry.user_id);
-
+  dom.fContent.value = detail.entry.content;
   renderLinks(detail.related);
   showForm(true);
+}
+
+function collectInput() {
+  const row = dom.list.querySelector('.row.editing');
+  if (!row || state.editingId === null) {
+    return null;
+  }
+  const read = (selector) => {
+    const node = row.querySelector(selector);
+    return node ? node.value : '';
+  };
+  return {
+    id: state.editingId,
+    user_id: read('.c-user') === '' ? null : Number(read('.c-user')),
+    title: read('.c-title'),
+    content: dom.fContent.value,
+    ticket: read('.c-ticket'),
+    status_id: Number(read('.c-status')),
+    work_date: read('.c-date'),
+    hours: Number(read('.c-hours')) || 0
+  };
+}
+
+async function saveSelected() {
+  const payload = collectInput();
+  if (!payload) {
+    return;
+  }
+  if (!payload.work_date) {
+    payload.work_date = UI.today();
+  }
+  const id = await UI.guard(() => API.saveEntry(payload));
+  if (id === undefined) {
+    return;
+  }
+
+  const entry = state.entries.find((item) => item.id === id);
+  if (entry) {
+    const status = state.statuses.find((item) => item.id === payload.status_id);
+    const user = state.users.find((item) => item.id === payload.user_id);
+    Object.assign(entry, {
+      title: payload.title,
+      ticket: payload.ticket,
+      work_date: payload.work_date,
+      hours: payload.hours,
+      status_id: payload.status_id,
+      status_name: status ? status.name : entry.status_name,
+      status_color: status ? status.color : entry.status_color,
+      user_id: payload.user_id,
+      user_name: user ? user.name : null
+    });
+  }
+
+  await refreshBadge();
 }
 
 function draftUserValue() {
@@ -259,30 +461,64 @@ function draftUserValue() {
   return state.users.length > 0 ? String(state.users[0].id) : '';
 }
 
-function startDraft() {
-  state.selectedId = null;
-  state.draftId = null;
-  dom.fTitle.value = '';
-  dom.fTicket.value = '';
-  dom.fWorkDate.value = dom.dateTo.value || UI.today();
-  dom.fHours.value = 0;
-  dom.fContent.value = '';
-  fillStatusSelect(dom.fStatus);
-  const fallback = state.settings.default_status_id;
-  if (fallback) {
-    dom.fStatus.value = fallback;
+async function createEntry(title, options = {}) {
+  const owner = draftUserValue();
+  const payload = {
+    id: null,
+    user_id: owner === '' ? null : Number(owner),
+    title: title ? title.trim() : '',
+    content: '',
+    ticket: '',
+    status_id: state.settings.default_status_id ? Number(state.settings.default_status_id) : null,
+    work_date: dom.dateTo.value || UI.today(),
+    hours: 0
+  };
+  const id = await UI.guard(() => API.saveEntry(payload));
+  if (id === undefined) {
+    return;
   }
-  dom.fUser.value = draftUserValue();
-  renderLinks([]);
-  showForm(true);
-  renderList();
-  dom.fTitle.focus();
+  await refresh(id);
+  scrollToSelected();
+
+  if (options.focusTitle) {
+    const node = dom.list.querySelector('.row.editing .c-title');
+    if (node) {
+      node.focus();
+      node.select();
+    }
+  }
+}
+
+async function removeEntry(id) {
+  if (!window.confirm(I18N.t('confirm.deleteEntry'))) {
+    return;
+  }
+  await UI.guard(() => API.deleteEntry(id));
+  state.selectedId = null;
+  state.editingId = null;
+  showForm(false);
+  UI.toast(I18N.t('toast.deleted'));
+  await refresh();
 }
 
 async function select(id) {
+  const leaving = state.editingId !== null && state.editingId !== id;
   state.selectedId = id;
-  renderList();
+  state.editingId = id;
+  if (leaving) {
+    await refresh(id);
+  } else {
+    renderList();
+  }
   await loadDetail(id);
+}
+
+function stopEditing() {
+  if (state.editingId === null) {
+    return;
+  }
+  state.editingId = null;
+  refresh();
 }
 
 async function navigateTo(id) {
@@ -335,18 +571,33 @@ function badgeText(report) {
   return { text: I18N.t('hours.over', { scope, n: UI.hours(diff) }), tone: 'over' };
 }
 
+const REMINDER_SCOPES = ['today', 'week', 'sprint'];
+
 async function refreshBadge() {
-  const scope = state.settings.reminder_range || 'week';
-  const report = await UI.guard(() =>
-    API.hoursReport(selectedUserId(), scope, dom.dateFrom.value, dom.dateTo.value)
-  );
-  if (!report) {
+  const current = REMINDER_SCOPES.includes(state.settings.reminder_range)
+    ? state.settings.reminder_range
+    : 'week';
+
+  const results = [];
+  for (const scope of REMINDER_SCOPES) {
+    const report = await UI.guard(() =>
+      API.hoursReport(selectedUserId(), scope, dom.dateFrom.value, dom.dateTo.value)
+    );
+    if (report) {
+      results.push({ scope, ...badgeText(report) });
+    }
+  }
+  if (results.length === 0) {
     return;
   }
-  const { text, tone } = badgeText(report);
-  dom.hoursBadge.textContent = text;
-  dom.hoursBadge.className = `badge ${tone}`.trim();
-  await UI.guard(() => API.updateTray(text, I18N.t('tray.show'), I18N.t('tray.quit')));
+
+  UI.clear(dom.hoursBadge);
+  results.forEach((item) => dom.hoursBadge.appendChild(option(item.scope, item.text)));
+  dom.hoursBadge.value = current;
+
+  const active = results.find((item) => item.scope === current) || results[0];
+  dom.hoursBadge.className = `badge ${active.tone}`.trim();
+  await UI.guard(() => API.updateTray(active.text, I18N.t('tray.show'), I18N.t('tray.quit')));
 }
 
 async function refresh(selectId) {
@@ -358,12 +609,16 @@ async function refresh(selectId) {
 
   if (selectId !== undefined) {
     state.selectedId = selectId;
+    state.editingId = selectId;
   }
-  if (state.selectedId !== null && !entries.some((entry) => entry.id === state.selectedId)) {
-    if (selectId === undefined) {
-      state.selectedId = null;
-      showForm(false);
-    }
+  if (
+    selectId === undefined &&
+    state.selectedId !== null &&
+    !entries.some((entry) => entry.id === state.selectedId)
+  ) {
+    state.selectedId = null;
+    state.editingId = null;
+    showForm(false);
   }
 
   renderList();
@@ -391,40 +646,6 @@ async function applyScope(scope) {
   dom.dateTo.value = range.date_to;
 }
 
-async function save() {
-  const input = {
-    id: state.selectedId,
-    user_id: dom.fUser.value === '' ? null : Number(dom.fUser.value),
-    title: dom.fTitle.value,
-    content: dom.fContent.value,
-    ticket: dom.fTicket.value,
-    status_id: dom.fStatus.value === '' ? null : Number(dom.fStatus.value),
-    work_date: dom.fWorkDate.value,
-    hours: Number(dom.fHours.value) || 0
-  };
-  const id = await UI.guard(() => API.saveEntry(input));
-  if (id === undefined) {
-    return;
-  }
-  UI.toast(I18N.t('toast.saved'));
-  await refresh(id);
-  scrollToSelected();
-}
-
-async function remove() {
-  if (state.selectedId === null) {
-    return;
-  }
-  if (!window.confirm(I18N.t('confirm.deleteEntry'))) {
-    return;
-  }
-  await UI.guard(() => API.deleteEntry(state.selectedId));
-  state.selectedId = null;
-  showForm(false);
-  UI.toast(I18N.t('toast.deleted'));
-  await refresh();
-}
-
 async function openLinkPicker() {
   if (state.selectedId === null) {
     return;
@@ -435,9 +656,7 @@ async function openLinkPicker() {
 }
 
 async function renderCandidates() {
-  const items = await UI.guard(() =>
-    API.linkCandidates(state.selectedId, dom.linkSearch.value)
-  );
+  const items = await UI.guard(() => API.linkCandidates(state.selectedId, dom.linkSearch.value));
   UI.clear(dom.linkCandidates);
   if (!items || items.length === 0) {
     dom.linkCandidates.appendChild(UI.el('div', 'hint', I18N.t('links.noCandidate')));
@@ -472,7 +691,7 @@ function parseJson(raw, fallback) {
 }
 
 function applyListWidth(width) {
-  const clamped = Math.min(Math.max(width, 200), 420);
+  const clamped = Math.min(Math.max(width, 420), 700);
   document.documentElement.style.setProperty('--list-w', `${clamped}px`);
   return clamped;
 }
@@ -515,7 +734,9 @@ function rememberFilter() {
     dateFrom: dom.dateFrom.value,
     dateTo: dom.dateTo.value,
     statusIds: [...state.statusFilter],
-    user: dom.userFilter.value
+    user: dom.userFilter.value,
+    sortField: state.sortField,
+    sortDir: state.sortDir
   });
   state.settings.last_filter = payload;
   UI.guard(() => API.setSetting('last_filter', payload));
@@ -534,8 +755,12 @@ function restoreFilter() {
   state.statusFilter = new Set(
     (saved.statusIds ?? []).filter((id) => state.statuses.some((status) => status.id === id))
   );
-  if (saved.user && [...dom.userFilter.options].some((option) => option.value === saved.user)) {
+  if (saved.user && [...dom.userFilter.options].some((item) => item.value === saved.user)) {
     dom.userFilter.value = saved.user;
+  }
+  if (SORT_COLUMNS.some((column) => column.field === saved.sortField)) {
+    state.sortField = saved.sortField;
+    state.sortDir = saved.sortDir === 'asc' ? 'asc' : 'desc';
   }
   renderStatusFilterButton();
   renderStatusChecks();
@@ -545,6 +770,7 @@ function restoreFilter() {
 function applyLanguageAndTheme() {
   I18N.set(state.settings.language || 'zh-TW');
   UI.applyTheme(state.settings.theme || 'dark');
+  UI.applyDensity(state.settings.density);
   I18N.apply();
   fillScopeSelect();
   fillUserSelects();
@@ -573,13 +799,17 @@ function bind() {
 
   dom.userFilter.addEventListener('change', () => refresh());
 
-  dom.newBtn.addEventListener('click', () => startDraft());
+  dom.hoursBadge.addEventListener('change', async () => {
+    state.settings.reminder_range = dom.hoursBadge.value;
+    await UI.guard(() => API.setSetting('reminder_range', dom.hoursBadge.value));
+    await refreshBadge();
+  });
+
   dom.settingsBtn.addEventListener('click', () =>
     UI.guard(() => API.openSettingsWindow(state.settings.theme || 'dark'))
   );
 
-  dom.saveBtn.addEventListener('click', () => save());
-  dom.deleteBtn.addEventListener('click', () => remove());
+  dom.fContent.addEventListener('change', () => saveSelected());
 
   dom.addLinkBtn.addEventListener('click', () => openLinkPicker());
   dom.linkDialogClose.addEventListener('click', () => dom.linkDialog.close());
@@ -587,18 +817,19 @@ function bind() {
 
   bindSplitter();
 
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('.detail-pane, dialog, .row')) {
+      return;
+    }
+    stopEditing();
+  });
+
   window.addEventListener('focus', () => reloadSettings());
 
   document.addEventListener('keydown', (event) => {
-    if (event.ctrlKey && event.key === 's') {
-      event.preventDefault();
-      if (!dom.detailForm.hidden) {
-        save();
-      }
-    }
     if (event.ctrlKey && event.key === 'n') {
       event.preventDefault();
-      startDraft();
+      createEntry('', { focusTitle: true });
     }
   });
 }
@@ -637,6 +868,7 @@ async function init() {
   if (layout.listWidth) {
     applyListWidth(layout.listWidth);
   }
+  applyColumns(layout.columns);
 
   const datesRestored = restoreFilter();
   if (!datesRestored) {

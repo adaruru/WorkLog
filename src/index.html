@@ -17,8 +17,7 @@
         <button class="btn" id="statusFilterBtn"></button>
         <select class="field compact" id="userFilter"></select>
         <span class="spacer"></span>
-        <span class="badge" id="hoursBadge"></span>
-        <button class="btn primary" id="newBtn" data-i18n="btn.new"></button>
+        <select class="badge" id="hoursBadge" data-i18n-title="general.reminder"></select>
         <button class="btn icon" id="settingsBtn" data-i18n-title="btn.settings">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"></circle>
@@ -30,6 +29,7 @@
       <div class="body">
         <section class="list-pane">
           <div class="pane-head"><span id="listCount"></span></div>
+          <div class="list-head" id="listHead"></div>
           <div class="list" id="list"></div>
         </section>
 
@@ -45,42 +45,9 @@
           </div>
 
           <div class="detail-form" id="detailForm" hidden>
-            <div>
-              <label class="label" for="fTitle" data-i18n="detail.title"></label>
-              <input class="input" id="fTitle" />
-            </div>
-
-            <div class="grid-2">
-              <div>
-                <label class="label" for="fTicket" data-i18n="detail.ticket"></label>
-                <input class="input" id="fTicket" />
-              </div>
-              <div>
-                <label class="label" for="fWorkDate" data-i18n="detail.workDate"></label>
-                <input class="input" type="date" id="fWorkDate" />
-              </div>
-              <div>
-                <label class="label" for="fStatus" data-i18n="detail.status"></label>
-                <select class="input" id="fStatus"></select>
-              </div>
-              <div>
-                <label class="label" for="fHours" data-i18n="detail.hours"></label>
-                <input class="input num" type="number" id="fHours" step="0.5" min="0" />
-              </div>
-              <div>
-                <label class="label" for="fUser" data-i18n="detail.user"></label>
-                <select class="input" id="fUser"></select>
-              </div>
-            </div>
-
-            <div>
+            <div class="content-block">
               <label class="label" for="fContent" data-i18n="detail.content"></label>
               <textarea class="input" id="fContent"></textarea>
-            </div>
-
-            <div class="actions">
-              <button class="btn primary" id="saveBtn" data-i18n="btn.save"></button>
-              <button class="btn danger" id="deleteBtn" data-i18n="btn.delete"></button>
             </div>
 
             <div class="section">

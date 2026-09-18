@@ -76,6 +76,7 @@ const API = {
 
   openSettingsWindow: (theme) => invoke('open_settings_window', { theme }),
   setWindowTheme: (theme) => invoke('set_window_theme', { theme }),
+  toggleDevtools: () => invoke('toggle_devtools'),
   updateTray: (tooltip, showLabel, quitLabel) =>
     invoke('update_tray', { tooltip, showLabel, quitLabel }),
 
@@ -89,6 +90,11 @@ const UI = {
     const value = ['dark', 'light', 'blue'].includes(theme) ? theme : 'dark';
     document.documentElement.dataset.theme = value;
     API.setWindowTheme(value).catch(() => {});
+  },
+
+  applyDensity(density) {
+    const value = ['compact', 'cozy', 'comfortable'].includes(density) ? density : 'cozy';
+    document.documentElement.dataset.density = value;
   },
 
   toast(message, isError = false) {
@@ -152,6 +158,13 @@ const UI = {
     return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   }
 };
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'F12') {
+    event.preventDefault();
+    API.toggleDevtools().catch(() => {});
+  }
+});
 
 window.API = API;
 window.UI = UI;

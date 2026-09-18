@@ -143,9 +143,6 @@ pub fn entry_detail(state: State<AppState>, id: i64) -> Answer<Option<EntryDetai
 
 #[tauri::command]
 pub fn save_entry(state: State<AppState>, input: EntryInput) -> Answer<i64> {
-    if input.title.trim().is_empty() {
-        return Err("標題不可空白".to_string());
-    }
     if calendar::parse_date(input.work_date.trim()).is_none() {
         return Err("工作日期格式需為 yyyy-MM-dd".to_string());
     }
@@ -314,6 +311,20 @@ pub async fn open_settings_window(app: AppHandle, theme: String) -> Answer<()> {
     .build()
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_devtools(window: tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
+    {
+        if window.is_devtools_open() {
+            window.close_devtools();
+        } else {
+            window.open_devtools();
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = window;
 }
 
 #[tauri::command]

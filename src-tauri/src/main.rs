@@ -64,6 +64,27 @@ fn remember_window_size(window: &tauri::Window) {
     let _ = store::set_setting(&conn, "window_layout", &payload.to_string());
 }
 
+#[cfg(windows)]
+fn release_browser_hotkeys(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        let Ok(settings) = core.Settings() else {
+            return;
+        };
+        if let Ok(extended) = settings.cast::<ICoreWebView2Settings3>() {
+            let _ = extended.SetAreBrowserAcceleratorKeysEnabled(false);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn release_browser_hotkeys(_window: &tauri::WebviewWindow) {}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -73,8 +94,11 @@ fn main() {
                 conn: Mutex::new(conn),
             });
 
-            if let (Some((width, height)), Some(window)) = (size, app.get_webview_window("main")) {
-                let _ = window.set_size(LogicalSize::new(width, height));
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some((width, height)) = size {
+                    let _ = window.set_size(LogicalSize::new(width, height));
+                }
+                release_browser_hotkeys(&window);
             }
 
             tray::refresh(app.handle(), "WorkLog", "顯示視窗", "離開")?;
@@ -125,6 +149,7 @@ fn main() {
             commands::hours_report,
             commands::open_settings_window,
             commands::set_window_theme,
+            commands::toggle_devtools,
             commands::update_tray,
             commands::current_db_path,
             commands::change_db_path,

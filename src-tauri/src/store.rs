@@ -186,7 +186,7 @@ fn map_entry(row: &rusqlite::Row) -> Result<Entry> {
 
 pub fn search_entries(conn: &Connection, filter: &EntryQuery) -> Result<Vec<Entry>> {
     let (where_sql, params) = query::build_filter(filter);
-    let sql = format!("{ENTRY_COLUMNS}{where_sql}{}", query::ORDER_BY);
+    let sql = format!("{ENTRY_COLUMNS}{where_sql}{}", query::build_order(filter));
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(params.iter()), map_entry)?;
     rows.collect()
