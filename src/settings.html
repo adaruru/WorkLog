@@ -61,10 +61,19 @@
         <div class="section">
           <div class="section-head"><span data-i18n="calendar.holidays"></span></div>
           <div class="section-body">
+            <div class="actions">
+              <select class="input compact" id="importYear"></select>
+              <button class="btn primary" id="importTaiwan" data-i18n="calendar.importTaiwan"></button>
+              <span class="hint" id="importHint" data-i18n="calendar.importHint"></span>
+            </div>
             <div class="table" id="holidayTable"></div>
             <div class="actions">
               <input class="input" type="date" id="newHolidayDate" />
               <input class="input" id="newHolidayName" data-i18n-placeholder="calendar.name" />
+              <label class="check">
+                <input type="checkbox" id="newHolidayWorkday" />
+                <span data-i18n="calendar.makeUp"></span>
+              </label>
               <button class="btn" id="addHoliday" data-i18n="calendar.addHoliday"></button>
             </div>
           </div>

@@ -41,21 +41,35 @@ pub fn month_range(date: NaiveDate) -> (NaiveDate, NaiveDate) {
     (start, end)
 }
 
-pub fn is_workday(date: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
-    !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) && !holidays.contains(&date)
+#[derive(Debug, Clone, Default)]
+pub struct Calendar {
+    pub holidays: HashSet<NaiveDate>,
+    pub extra_workdays: HashSet<NaiveDate>,
 }
 
-pub fn required_hours(
-    date: NaiveDate,
-    daily_required: f64,
-    holidays: &HashSet<NaiveDate>,
-    leaves: &HashMap<NaiveDate, f64>,
-) -> f64 {
-    if !is_workday(date, holidays) {
-        return 0.0;
+impl Calendar {
+    pub fn is_workday(&self, date: NaiveDate) -> bool {
+        if self.extra_workdays.contains(&date) {
+            return true;
+        }
+        if self.holidays.contains(&date) {
+            return false;
+        }
+        !matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
     }
-    let leave = leaves.get(&date).copied().unwrap_or(0.0);
-    (daily_required - leave).max(0.0)
+
+    pub fn required_hours(
+        &self,
+        date: NaiveDate,
+        daily_required: f64,
+        leaves: &HashMap<NaiveDate, f64>,
+    ) -> f64 {
+        if !self.is_workday(date) {
+            return 0.0;
+        }
+        let leave = leaves.get(&date).copied().unwrap_or(0.0);
+        (daily_required - leave).max(0.0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,7 +83,7 @@ pub fn summarize(
     from: NaiveDate,
     to: NaiveDate,
     daily_required: f64,
-    holidays: &HashSet<NaiveDate>,
+    calendar: &Calendar,
     leaves: &HashMap<NaiveDate, f64>,
     filled: &HashMap<NaiveDate, f64>,
 ) -> HoursSummary {
@@ -77,7 +91,7 @@ pub fn summarize(
     let mut filled_total = 0.0;
     let mut cursor = from;
     while cursor <= to {
-        required_total += required_hours(cursor, daily_required, holidays, leaves);
+        required_total += calendar.required_hours(cursor, daily_required, leaves);
         filled_total += filled.get(&cursor).copied().unwrap_or(0.0);
         cursor += Duration::days(1);
     }
@@ -181,38 +195,72 @@ mod tests {
         assert_eq!(end, date("2026-12-31"));
     }
 
+    fn cal(holidays: &[&str], workdays: &[&str]) -> Calendar {
+        Calendar {
+            holidays: holidays.iter().map(|value| date(value)).collect(),
+            extra_workdays: workdays.iter().map(|value| date(value)).collect(),
+        }
+    }
+
     #[test]
     fn weekend_is_not_a_workday() {
-        let holidays = HashSet::new();
-        assert!(!is_workday(date("2026-09-19"), &holidays));
-        assert!(!is_workday(date("2026-09-20"), &holidays));
-        assert!(is_workday(date("2026-09-18"), &holidays));
+        let calendar = Calendar::default();
+        assert!(!calendar.is_workday(date("2026-09-19")));
+        assert!(!calendar.is_workday(date("2026-09-20")));
+        assert!(calendar.is_workday(date("2026-09-18")));
     }
 
     #[test]
     fn holiday_is_not_a_workday() {
-        let holidays = HashSet::from([date("2026-09-18")]);
-        assert!(!is_workday(date("2026-09-18"), &holidays));
+        let calendar = cal(&["2026-09-18"], &[]);
+        assert!(!calendar.is_workday(date("2026-09-18")));
+    }
+
+    #[test]
+    fn make_up_day_turns_a_weekend_into_a_workday() {
+        let calendar = cal(&[], &["2025-02-08"]);
+        assert!(calendar.is_workday(date("2025-02-08")));
+    }
+
+    #[test]
+    fn make_up_day_wins_over_holiday_on_the_same_date() {
+        let calendar = cal(&["2025-02-08"], &["2025-02-08"]);
+        assert!(calendar.is_workday(date("2025-02-08")));
     }
 
     #[test]
     fn required_hours_is_zero_on_weekend() {
-        let required = required_hours(date("2026-09-19"), 8.0, &HashSet::new(), &HashMap::new());
+        let required = Calendar::default().required_hours(date("2026-09-19"), 8.0, &HashMap::new());
         assert_eq!(required, 0.0);
+    }
+
+    #[test]
+    fn make_up_day_requires_a_full_day() {
+        let calendar = cal(&[], &["2025-02-08"]);
+        let required = calendar.required_hours(date("2025-02-08"), 8.0, &HashMap::new());
+        assert_eq!(required, 8.0);
     }
 
     #[test]
     fn leave_reduces_required_hours() {
         let leaves = HashMap::from([(date("2026-09-18"), 4.0)]);
-        let required = required_hours(date("2026-09-18"), 8.0, &HashSet::new(), &leaves);
+        let required = Calendar::default().required_hours(date("2026-09-18"), 8.0, &leaves);
         assert_eq!(required, 4.0);
     }
 
     #[test]
     fn leave_longer_than_required_clamps_to_zero() {
         let leaves = HashMap::from([(date("2026-09-18"), 10.0)]);
-        let required = required_hours(date("2026-09-18"), 8.0, &HashSet::new(), &leaves);
+        let required = Calendar::default().required_hours(date("2026-09-18"), 8.0, &leaves);
         assert_eq!(required, 0.0);
+    }
+
+    #[test]
+    fn leave_on_a_make_up_day_is_deducted() {
+        let calendar = cal(&[], &["2025-02-08"]);
+        let leaves = HashMap::from([(date("2025-02-08"), 4.0)]);
+        let required = calendar.required_hours(date("2025-02-08"), 8.0, &leaves);
+        assert_eq!(required, 4.0);
     }
 
     #[test]
@@ -222,7 +270,7 @@ mod tests {
             date("2026-09-14"),
             date("2026-09-18"),
             8.0,
-            &HashSet::new(),
+            &Calendar::default(),
             &HashMap::new(),
             &filled,
         );
@@ -238,7 +286,7 @@ mod tests {
             date("2026-09-14"),
             date("2026-09-15"),
             8.0,
-            &HashSet::new(),
+            &Calendar::default(),
             &HashMap::new(),
             &filled,
         );
@@ -252,7 +300,7 @@ mod tests {
             date("2026-09-14"),
             date("2026-09-14"),
             8.0,
-            &HashSet::new(),
+            &Calendar::default(),
             &HashMap::new(),
             &filled,
         );
@@ -261,12 +309,11 @@ mod tests {
 
     #[test]
     fn summarize_skips_weekend_and_holiday() {
-        let holidays = HashSet::from([date("2026-09-18")]);
         let summary = summarize(
             date("2026-09-14"),
             date("2026-09-20"),
             8.0,
-            &holidays,
+            &cal(&["2026-09-18"], &[]),
             &HashMap::new(),
             &HashMap::new(),
         );
@@ -275,13 +322,12 @@ mod tests {
 
     #[test]
     fn summarize_counts_hours_logged_on_a_holiday() {
-        let holidays = HashSet::from([date("2026-09-18")]);
         let filled = HashMap::from([(date("2026-09-18"), 5.0)]);
         let summary = summarize(
             date("2026-09-18"),
             date("2026-09-18"),
             8.0,
-            &holidays,
+            &cal(&["2026-09-18"], &[]),
             &HashMap::new(),
             &filled,
         );

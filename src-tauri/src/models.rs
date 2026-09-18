@@ -49,8 +49,7 @@ pub struct EntryRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryDetail {
     pub entry: Entry,
-    pub links_out: Vec<EntryRef>,
-    pub links_in: Vec<EntryRef>,
+    pub related: Vec<EntryRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +109,7 @@ pub struct Leave {
 pub struct Holiday {
     pub date: String,
     pub name: String,
+    pub is_workday: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

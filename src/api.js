@@ -55,11 +55,14 @@ const API = {
 
   linkCandidates: (entryId, keyword) => invoke('link_candidates', { entryId, keyword }),
   linkEntries: (entryId, linkedEntryId) => invoke('link_entries', { entryId, linkedEntryId }),
-  unlinkEntries: (entryId, linkedEntryId) => invoke('unlink_entries', { entryId, linkedEntryId }),
+  unlinkEntry: (id) => invoke('unlink_entry', { id }),
 
   listHolidays: () => invoke('list_holidays'),
-  saveHoliday: (date, name) => invoke('save_holiday', { date, name }),
+  saveHoliday: (date, name, isWorkday = false) =>
+    invoke('save_holiday', { date, name, isWorkday }),
   deleteHoliday: (date) => invoke('delete_holiday', { date }),
+  importHolidays: (year, items, replace) =>
+    invoke('import_holidays', { year, items, replace }),
 
   listLeaves: (userId) => invoke('list_leaves', { userId: userId ?? null }),
   saveLeave: (id, userId, leaveDate, hours, note) =>
@@ -71,7 +74,8 @@ const API = {
   hoursReport: (userId, scope, dateFrom, dateTo) =>
     invoke('hours_report', { userId: userId ?? null, scope, dateFrom, dateTo }),
 
-  openSettingsWindow: () => invoke('open_settings_window'),
+  openSettingsWindow: (theme) => invoke('open_settings_window', { theme }),
+  setWindowTheme: (theme) => invoke('set_window_theme', { theme }),
   updateTray: (tooltip, showLabel, quitLabel) =>
     invoke('update_tray', { tooltip, showLabel, quitLabel }),
 
@@ -84,6 +88,7 @@ const UI = {
   applyTheme(theme) {
     const value = ['dark', 'light', 'blue'].includes(theme) ? theme : 'dark';
     document.documentElement.dataset.theme = value;
+    API.setWindowTheme(value).catch(() => {});
   },
 
   toast(message, isError = false) {

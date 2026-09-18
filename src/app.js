@@ -18,7 +18,7 @@ function cache() {
     'keyword', 'rangeScope', 'dateFrom', 'dateTo', 'statusFilterBtn', 'userFilter',
     'hoursBadge', 'newBtn', 'settingsBtn', 'listCount', 'list', 'detailEmpty', 'detailForm',
     'fTitle', 'fTicket', 'fWorkDate', 'fStatus', 'fHours', 'fUser', 'fContent',
-    'saveBtn', 'deleteBtn', 'addLinkBtn', 'linksOut', 'linksIn',
+    'saveBtn', 'deleteBtn', 'addLinkBtn', 'linksRelated',
     'statusDialog', 'statusChecks', 'statusDialogClose',
     'linkDialog', 'linkSearch', 'linkCandidates', 'linkDialogClose',
     'splitter'
@@ -155,6 +155,7 @@ function renderList() {
       row.classList.add('selected');
     }
 
+    row.appendChild(UI.el('div', 'row-ticket', entry.ticket));
     row.appendChild(UI.el('div', 'row-title', entry.title));
     row.appendChild(UI.el('div', 'row-hours', `${UI.hours(entry.hours)}h`));
 
@@ -178,9 +179,6 @@ function renderList() {
     });
     meta.appendChild(statusSelect);
 
-    if (entry.ticket) {
-      meta.appendChild(UI.el('span', null, entry.ticket));
-    }
     meta.appendChild(UI.el('span', 'num', entry.work_date));
     if (entry.user_name) {
       meta.appendChild(UI.el('span', null, entry.user_name));
@@ -192,29 +190,31 @@ function renderList() {
   });
 }
 
-function renderLinks(container, items, removable) {
-  UI.clear(container);
+function renderLinks(items) {
+  UI.clear(dom.linksRelated);
   if (items.length === 0) {
-    container.appendChild(UI.el('div', 'hint', I18N.t('links.none')));
+    dom.linksRelated.appendChild(UI.el('div', 'hint', I18N.t('links.none')));
     return;
   }
   items.forEach((item) => {
     const row = UI.el('div', 'link-row');
     row.appendChild(UI.dot(item.status_color));
+    if (item.ticket) {
+      row.appendChild(UI.el('span', 'link-ticket', item.ticket));
+    }
     row.appendChild(UI.el('span', 'link-title', item.title));
     row.appendChild(UI.el('span', 'link-meta', item.work_date));
     row.addEventListener('click', () => navigateTo(item.id));
 
-    if (removable) {
-      const remove = UI.el('button', 'btn tiny ghost', '✕');
-      remove.addEventListener('click', async (event) => {
-        event.stopPropagation();
-        await UI.guard(() => API.unlinkEntries(state.selectedId, item.id));
-        await loadDetail(state.selectedId);
-      });
-      row.appendChild(remove);
-    }
-    container.appendChild(row);
+    const remove = UI.el('button', 'btn tiny ghost', '✕');
+    remove.title = I18N.t('links.remove');
+    remove.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await UI.guard(() => API.unlinkEntry(item.id));
+      await loadDetail(state.selectedId);
+    });
+    row.appendChild(remove);
+    dom.linksRelated.appendChild(row);
   });
 }
 
@@ -244,9 +244,19 @@ async function loadDetail(id) {
   dom.fStatus.value = String(entry.status_id);
   dom.fUser.value = entry.user_id === null ? '' : String(entry.user_id);
 
-  renderLinks(dom.linksOut, detail.links_out, true);
-  renderLinks(dom.linksIn, detail.links_in, false);
+  renderLinks(detail.related);
   showForm(true);
+}
+
+function draftUserValue() {
+  const filter = dom.userFilter.value;
+  if (filter === 'unowned') {
+    return '';
+  }
+  if (filter !== 'any') {
+    return filter;
+  }
+  return state.users.length > 0 ? String(state.users[0].id) : '';
 }
 
 function startDraft() {
@@ -262,9 +272,8 @@ function startDraft() {
   if (fallback) {
     dom.fStatus.value = fallback;
   }
-  dom.fUser.value = selectedUserId() === null ? '' : String(selectedUserId());
-  renderLinks(dom.linksOut, [], true);
-  renderLinks(dom.linksIn, [], false);
+  dom.fUser.value = draftUserValue();
+  renderLinks([]);
   showForm(true);
   renderList();
   dom.fTitle.focus();
@@ -437,6 +446,9 @@ async function renderCandidates() {
   items.forEach((item) => {
     const row = UI.el('div', 'link-row');
     row.appendChild(UI.dot(item.status_color));
+    if (item.ticket) {
+      row.appendChild(UI.el('span', 'link-ticket', item.ticket));
+    }
     row.appendChild(UI.el('span', 'link-title', item.title));
     row.appendChild(UI.el('span', 'link-meta', item.work_date));
     row.addEventListener('click', async () => {
@@ -562,7 +574,9 @@ function bind() {
   dom.userFilter.addEventListener('change', () => refresh());
 
   dom.newBtn.addEventListener('click', () => startDraft());
-  dom.settingsBtn.addEventListener('click', () => UI.guard(() => API.openSettingsWindow()));
+  dom.settingsBtn.addEventListener('click', () =>
+    UI.guard(() => API.openSettingsWindow(state.settings.theme || 'dark'))
+  );
 
   dom.saveBtn.addEventListener('click', () => save());
   dom.deleteBtn.addEventListener('click', () => remove());

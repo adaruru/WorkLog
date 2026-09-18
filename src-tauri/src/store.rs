@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use chrono::{Duration, Local, NaiveDate};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result};
@@ -57,7 +57,7 @@ fn default_status_id(conn: &Connection) -> Result<i64> {
 pub fn list_users(conn: &Connection) -> Result<Vec<User>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, daily_required_hours, is_active, sort_order
-         FROM users ORDER BY sort_order, name",
+         FROM users ORDER BY created_at, id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(User {
@@ -251,7 +251,11 @@ pub fn set_entry_status(conn: &Connection, id: i64, status_id: i64) -> Result<()
 }
 
 pub fn delete_entry(conn: &Connection, id: i64) -> Result<()> {
+    let group = group_of(conn, id)?;
     conn.execute("DELETE FROM entries WHERE id = ?1", params![id])?;
+    if let Some(group) = group {
+        dissolve_if_alone(conn, group)?;
+    }
     Ok(())
 }
 
@@ -275,42 +279,68 @@ pub fn entry_detail(conn: &Connection, id: i64) -> Result<Option<EntryDetail>> {
         return Ok(None);
     };
 
-    let out_sql = format!(
-        "{REF_COLUMNS} JOIN entry_links l ON l.linked_entry_id = e.id
-         WHERE l.entry_id = ?1 ORDER BY e.updated_at DESC"
-    );
-    let mut stmt = conn.prepare(&out_sql)?;
-    let links_out: Vec<EntryRef> = stmt
-        .query_map(params![id], map_ref)?
-        .collect::<Result<Vec<_>>>()?;
+    let related = match group_of(conn, id)? {
+        Some(group) => {
+            let sql = format!(
+                "{REF_COLUMNS} WHERE e.group_id = ?1 AND e.id <> ?2 ORDER BY e.updated_at DESC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params![group, id], map_ref)?
+                .collect::<Result<Vec<_>>>()?;
+            rows
+        }
+        None => Vec::new(),
+    };
 
-    let in_sql = format!(
-        "{REF_COLUMNS} JOIN entry_links l ON l.entry_id = e.id
-         WHERE l.linked_entry_id = ?1 ORDER BY e.updated_at DESC"
-    );
-    let mut stmt = conn.prepare(&in_sql)?;
-    let links_in: Vec<EntryRef> = stmt
-        .query_map(params![id], map_ref)?
-        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(EntryDetail { entry, related }))
+}
 
-    Ok(Some(EntryDetail {
-        entry,
-        links_out,
-        links_in,
-    }))
+fn group_of(conn: &Connection, id: i64) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT group_id FROM entries WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .optional()
+    .map(|value| value.flatten())
+}
+
+fn set_group(conn: &Connection, id: i64, group: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE entries SET group_id = ?2 WHERE id = ?1",
+        params![id, group],
+    )?;
+    Ok(())
+}
+
+fn dissolve_if_alone(conn: &Connection, group: i64) -> Result<()> {
+    let remaining: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM entries WHERE group_id = ?1",
+        params![group],
+        |row| row.get(0),
+    )?;
+    if remaining <= 1 {
+        conn.execute(
+            "UPDATE entries SET group_id = NULL WHERE group_id = ?1",
+            params![group],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn link_candidates(conn: &Connection, entry_id: i64, keyword: &str) -> Result<Vec<EntryRef>> {
     let keyword = keyword.trim();
-    let like = format!("%{}%", keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+    let like = format!("%{}%", query::escape_like(keyword));
+    let group = group_of(conn, entry_id)?;
     let sql = format!(
         "{REF_COLUMNS} WHERE e.id <> ?1
-         AND e.id NOT IN (SELECT linked_entry_id FROM entry_links WHERE entry_id = ?1)
-         AND (?2 = '' OR e.title LIKE ?3 ESCAPE '\\' OR IFNULL(e.ticket, '') LIKE ?3 ESCAPE '\\')
+         AND (?2 IS NULL OR e.group_id IS NULL OR e.group_id <> ?2)
+         AND (?3 = '' OR e.title LIKE ?4 ESCAPE '\\' OR IFNULL(e.ticket, '') LIKE ?4 ESCAPE '\\')
          ORDER BY e.updated_at DESC LIMIT 50"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![entry_id, keyword, like], map_ref)?;
+    let rows = stmt.query_map(params![entry_id, group, keyword, like], map_ref)?;
     rows.collect()
 }
 
@@ -318,37 +348,80 @@ pub fn link_entries(conn: &Connection, entry_id: i64, linked_entry_id: i64) -> R
     if entry_id == linked_entry_id {
         return Ok(());
     }
-    conn.execute(
-        "INSERT OR IGNORE INTO entry_links (entry_id, linked_entry_id) VALUES (?1, ?2)",
-        params![entry_id, linked_entry_id],
-    )?;
+
+    match (group_of(conn, entry_id)?, group_of(conn, linked_entry_id)?) {
+        (None, None) => {
+            let next: i64 = conn.query_row(
+                "SELECT IFNULL(MAX(group_id), 0) + 1 FROM entries",
+                [],
+                |row| row.get(0),
+            )?;
+            set_group(conn, entry_id, Some(next))?;
+            set_group(conn, linked_entry_id, Some(next))?;
+        }
+        (Some(group), None) => set_group(conn, linked_entry_id, Some(group))?,
+        (None, Some(group)) => set_group(conn, entry_id, Some(group))?,
+        (Some(keep), Some(merge)) if keep != merge => {
+            conn.execute(
+                "UPDATE entries SET group_id = ?1 WHERE group_id = ?2",
+                params![keep, merge],
+            )?;
+        }
+        _ => {}
+    }
     Ok(())
 }
 
-pub fn unlink_entries(conn: &Connection, entry_id: i64, linked_entry_id: i64) -> Result<()> {
-    conn.execute(
-        "DELETE FROM entry_links WHERE entry_id = ?1 AND linked_entry_id = ?2",
-        params![entry_id, linked_entry_id],
-    )?;
-    Ok(())
+pub fn unlink_entry(conn: &Connection, id: i64) -> Result<()> {
+    let Some(group) = group_of(conn, id)? else {
+        return Ok(());
+    };
+    set_group(conn, id, None)?;
+    dissolve_if_alone(conn, group)
 }
 
 pub fn list_holidays(conn: &Connection) -> Result<Vec<Holiday>> {
-    let mut stmt = conn.prepare("SELECT date, name FROM holidays ORDER BY date DESC")?;
+    let mut stmt =
+        conn.prepare("SELECT date, name, is_workday FROM holidays ORDER BY date DESC")?;
     let rows = stmt.query_map([], |row| {
         Ok(Holiday {
             date: row.get(0)?,
             name: row.get(1)?,
+            is_workday: row.get::<_, i64>(2)? != 0,
         })
     })?;
     rows.collect()
 }
 
-pub fn save_holiday(conn: &Connection, date: &str, name: &str) -> Result<()> {
+pub fn save_holiday(conn: &Connection, date: &str, name: &str, is_workday: bool) -> Result<()> {
     conn.execute(
-        "INSERT INTO holidays (date, name) VALUES (?1, ?2)
-         ON CONFLICT(date) DO UPDATE SET name = excluded.name",
-        params![date, name],
+        "INSERT INTO holidays (date, name, is_workday) VALUES (?1, ?2, ?3)
+         ON CONFLICT(date) DO UPDATE SET name = excluded.name, is_workday = excluded.is_workday",
+        params![date, name, is_workday as i64],
+    )?;
+    Ok(())
+}
+
+pub fn import_holidays(conn: &Connection, items: &[Holiday]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    for item in items {
+        if calendar::parse_date(item.date.trim()).is_none() {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO holidays (date, name, is_workday) VALUES (?1, ?2, ?3)
+             ON CONFLICT(date) DO UPDATE SET name = excluded.name, is_workday = excluded.is_workday",
+            params![item.date.trim(), item.name.trim(), item.is_workday as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(items.len())
+}
+
+pub fn clear_holidays_in_year(conn: &Connection, year: i32) -> Result<()> {
+    conn.execute(
+        "DELETE FROM holidays WHERE date LIKE ?1",
+        params![format!("{year}-%")],
     )?;
     Ok(())
 }
@@ -529,12 +602,24 @@ pub fn hours_report(
     let from_text = calendar::format_date(from);
     let to_text = calendar::format_date(to);
 
-    let mut stmt = conn.prepare("SELECT date FROM holidays WHERE date BETWEEN ?1 AND ?2")?;
-    let holidays: HashSet<NaiveDate> = stmt
-        .query_map(params![from_text, to_text], |row| row.get::<_, String>(0))?
-        .filter_map(|value| value.ok())
-        .filter_map(|value| calendar::parse_date(&value))
-        .collect();
+    let mut stmt =
+        conn.prepare("SELECT date, is_workday FROM holidays WHERE date BETWEEN ?1 AND ?2")?;
+    let mut calendar = calendar::Calendar::default();
+    for row in stmt.query_map(params![from_text, to_text], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+    })? {
+        let Ok((value, is_workday)) = row else {
+            continue;
+        };
+        let Some(date) = calendar::parse_date(&value) else {
+            continue;
+        };
+        if is_workday {
+            calendar.extra_workdays.insert(date);
+        } else {
+            calendar.holidays.insert(date);
+        }
+    }
 
     let mut stmt = conn.prepare(
         "SELECT leave_date, SUM(hours) FROM user_leaves
@@ -560,7 +645,7 @@ pub fn hours_report(
         .filter_map(|(date, hours)| calendar::parse_date(&date).map(|date| (date, hours)))
         .collect();
 
-    let summary = calendar::summarize(from, to, daily_required, &holidays, &leaves, &filled);
+    let summary = calendar::summarize(from, to, daily_required, &calendar, &leaves, &filled);
 
     Ok(HoursReport {
         scope: resolved.scope,
@@ -620,6 +705,17 @@ mod tests {
         let id = save_entry(&conn, &sample_entry(None, "第一筆", "2026-09-18", 1.0)).unwrap();
         let entry = get_entry(&conn, id).unwrap().unwrap();
         assert_eq!(entry.status_name, "new");
+    }
+
+    #[test]
+    fn users_are_listed_oldest_first() {
+        let conn = setup();
+        let first = create_user(&conn, "最早建立", 8.0).unwrap();
+        let second = create_user(&conn, "接著建立", 8.0).unwrap();
+        let third = create_user(&conn, "最後建立", 8.0).unwrap();
+
+        let ids: Vec<i64> = list_users(&conn).unwrap().iter().map(|user| user.id).collect();
+        assert_eq!(ids, vec![first, second, third]);
     }
 
     #[test]
@@ -710,7 +806,7 @@ mod tests {
     }
 
     #[test]
-    fn links_are_stored_once_and_read_from_both_sides() {
+    fn linking_puts_both_entries_in_one_group() {
         let conn = setup();
         let bug = save_entry(&conn, &sample_entry(None, "修登入頁 bug", "2026-09-18", 1.0)).unwrap();
         let revamp = save_entry(&conn, &sample_entry(None, "登入頁改版", "2026-09-17", 1.0)).unwrap();
@@ -718,39 +814,109 @@ mod tests {
         link_entries(&conn, bug, revamp).unwrap();
 
         let from_bug = entry_detail(&conn, bug).unwrap().unwrap();
-        assert_eq!(from_bug.links_out.len(), 1);
-        assert_eq!(from_bug.links_out[0].title, "登入頁改版");
-        assert!(from_bug.links_in.is_empty());
+        assert_eq!(from_bug.related.len(), 1);
+        assert_eq!(from_bug.related[0].title, "登入頁改版");
 
         let from_revamp = entry_detail(&conn, revamp).unwrap().unwrap();
-        assert!(from_revamp.links_out.is_empty());
-        assert_eq!(from_revamp.links_in.len(), 1);
-        assert_eq!(from_revamp.links_in[0].title, "修登入頁 bug");
+        assert_eq!(from_revamp.related.len(), 1);
+        assert_eq!(from_revamp.related[0].title, "修登入頁 bug");
     }
 
     #[test]
-    fn deleting_an_entry_removes_its_links() {
+    fn a_third_entry_joins_the_existing_group() {
         let conn = setup();
-        let bug = save_entry(&conn, &sample_entry(None, "修登入頁 bug", "2026-09-18", 1.0)).unwrap();
-        let revamp = save_entry(&conn, &sample_entry(None, "登入頁改版", "2026-09-17", 1.0)).unwrap();
-        link_entries(&conn, bug, revamp).unwrap();
+        let first = save_entry(&conn, &sample_entry(None, "甲", "2026-09-18", 1.0)).unwrap();
+        let second = save_entry(&conn, &sample_entry(None, "乙", "2026-09-17", 1.0)).unwrap();
+        let third = save_entry(&conn, &sample_entry(None, "丙", "2026-09-16", 1.0)).unwrap();
 
-        delete_entry(&conn, revamp).unwrap();
+        link_entries(&conn, first, second).unwrap();
+        link_entries(&conn, second, third).unwrap();
 
-        let from_bug = entry_detail(&conn, bug).unwrap().unwrap();
-        assert!(from_bug.links_out.is_empty());
+        for id in [first, second, third] {
+            let detail = entry_detail(&conn, id).unwrap().unwrap();
+            assert_eq!(detail.related.len(), 2, "紀錄 {id} 應該看到另外兩筆");
+        }
     }
 
     #[test]
-    fn link_candidates_exclude_self_and_existing_links() {
+    fn linking_two_groups_merges_them() {
+        let conn = setup();
+        let a1 = save_entry(&conn, &sample_entry(None, "A1", "2026-09-18", 1.0)).unwrap();
+        let a2 = save_entry(&conn, &sample_entry(None, "A2", "2026-09-17", 1.0)).unwrap();
+        let b1 = save_entry(&conn, &sample_entry(None, "B1", "2026-09-16", 1.0)).unwrap();
+        let b2 = save_entry(&conn, &sample_entry(None, "B2", "2026-09-15", 1.0)).unwrap();
+
+        link_entries(&conn, a1, a2).unwrap();
+        link_entries(&conn, b1, b2).unwrap();
+        link_entries(&conn, a1, b1).unwrap();
+
+        for id in [a1, a2, b1, b2] {
+            let detail = entry_detail(&conn, id).unwrap().unwrap();
+            assert_eq!(detail.related.len(), 3);
+        }
+    }
+
+    #[test]
+    fn unlinking_removes_only_that_entry_from_the_group() {
+        let conn = setup();
+        let first = save_entry(&conn, &sample_entry(None, "甲", "2026-09-18", 1.0)).unwrap();
+        let second = save_entry(&conn, &sample_entry(None, "乙", "2026-09-17", 1.0)).unwrap();
+        let third = save_entry(&conn, &sample_entry(None, "丙", "2026-09-16", 1.0)).unwrap();
+        link_entries(&conn, first, second).unwrap();
+        link_entries(&conn, second, third).unwrap();
+
+        unlink_entry(&conn, second).unwrap();
+
+        assert!(entry_detail(&conn, second).unwrap().unwrap().related.is_empty());
+        let remaining = entry_detail(&conn, first).unwrap().unwrap();
+        assert_eq!(remaining.related.len(), 1);
+        assert_eq!(remaining.related[0].title, "丙");
+    }
+
+    #[test]
+    fn a_group_left_with_one_member_dissolves() {
+        let conn = setup();
+        let first = save_entry(&conn, &sample_entry(None, "甲", "2026-09-18", 1.0)).unwrap();
+        let second = save_entry(&conn, &sample_entry(None, "乙", "2026-09-17", 1.0)).unwrap();
+        link_entries(&conn, first, second).unwrap();
+
+        unlink_entry(&conn, second).unwrap();
+
+        let group: Option<i64> = conn
+            .query_row(
+                "SELECT group_id FROM entries WHERE id = ?1",
+                params![first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(group, None);
+    }
+
+    #[test]
+    fn deleting_an_entry_dissolves_a_two_member_group() {
+        let conn = setup();
+        let first = save_entry(&conn, &sample_entry(None, "甲", "2026-09-18", 1.0)).unwrap();
+        let second = save_entry(&conn, &sample_entry(None, "乙", "2026-09-17", 1.0)).unwrap();
+        link_entries(&conn, first, second).unwrap();
+
+        delete_entry(&conn, second).unwrap();
+
+        assert!(entry_detail(&conn, first).unwrap().unwrap().related.is_empty());
+    }
+
+    #[test]
+    fn link_candidates_exclude_self_and_group_members() {
         let conn = setup();
         let bug = save_entry(&conn, &sample_entry(None, "修登入頁 bug", "2026-09-18", 1.0)).unwrap();
         let revamp = save_entry(&conn, &sample_entry(None, "登入頁改版", "2026-09-17", 1.0)).unwrap();
         let other = save_entry(&conn, &sample_entry(None, "報表匯出", "2026-09-16", 1.0)).unwrap();
         link_entries(&conn, bug, revamp).unwrap();
 
-        let candidates = link_candidates(&conn, bug, "").unwrap();
-        let ids: Vec<i64> = candidates.iter().map(|item| item.id).collect();
+        let ids: Vec<i64> = link_candidates(&conn, bug, "")
+            .unwrap()
+            .iter()
+            .map(|item| item.id)
+            .collect();
         assert_eq!(ids, vec![other]);
     }
 
@@ -771,8 +937,11 @@ mod tests {
         )
         .unwrap();
 
-        let candidates = link_candidates(&conn, anchor, "").unwrap();
-        let ids: Vec<i64> = candidates.iter().map(|item| item.id).collect();
+        let ids: Vec<i64> = link_candidates(&conn, anchor, "")
+            .unwrap()
+            .iter()
+            .map(|item| item.id)
+            .collect();
         assert_eq!(ids, vec![second, first]);
     }
 
@@ -815,7 +984,7 @@ mod tests {
     fn hours_report_ignores_holidays_in_required() {
         let conn = setup();
         let user_id = create_user(&conn, "amanda", 8.0).unwrap();
-        save_holiday(&conn, "2026-09-14", "測試假日").unwrap();
+        save_holiday(&conn, "2026-09-14", "測試假日", false).unwrap();
 
         let report = hours_report(&conn, Some(user_id), "custom", "2026-09-14", "2026-09-14").unwrap();
         assert_eq!(report.required, 0.0);

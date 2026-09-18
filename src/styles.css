@@ -25,6 +25,7 @@
   --text-dim: #8b93a5;
   --accent: #5b8cff;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --picker-invert: 1;
 }
 
 [data-theme='light'] {
@@ -38,6 +39,7 @@
   --text-dim: #6b7280;
   --accent: #2563eb;
   --shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --picker-invert: 0;
 }
 
 [data-theme='blue'] {
@@ -51,6 +53,7 @@
   --text-dim: #8db0d6;
   --accent: #38bdf8;
   --shadow: 0 8px 24px rgba(2, 12, 27, 0.5);
+  --picker-invert: 1;
 }
 
 * {
@@ -292,12 +295,25 @@ select.field {
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 8px;
+  grid-template-columns: auto 1fr auto;
+  gap: 2px 7px;
   padding: 5px var(--pad) 5px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   cursor: pointer;
   transition: background var(--ease);
+}
+
+.row-ticket {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-ticket:empty {
+  display: none;
 }
 
 .row:hover {
@@ -445,6 +461,12 @@ textarea.input {
 
 .link-row:hover {
   background: var(--bg-elevated);
+}
+
+.link-ticket {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .link-title {
@@ -662,4 +684,38 @@ dialog::backdrop {
   font-size: var(--fs-sm);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator {
+  filter: invert(var(--picker-invert, 1));
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  transition: opacity var(--ease);
+}
+
+input[type='date']::-webkit-calendar-picker-indicator:hover,
+input[type='time']::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+input[type='number']::-webkit-inner-spin-button {
+  filter: invert(var(--picker-invert, 1));
+  opacity: 0.5;
+}
+
+input[type='color'] {
+  padding: 2px;
+  cursor: pointer;
+}
+
+input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
 }

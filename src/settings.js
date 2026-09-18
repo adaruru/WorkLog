@@ -15,7 +15,8 @@ function cache() {
     'language', 'theme', 'reminderRange',
     'userTable', 'newUserName', 'newUserHours', 'addUser',
     'defaultStatus', 'statusTable', 'newStatusName', 'newStatusColor', 'addStatus',
-    'holidayTable', 'newHolidayDate', 'newHolidayName', 'addHoliday',
+    'holidayTable', 'newHolidayDate', 'newHolidayName', 'newHolidayWorkday', 'addHoliday',
+    'importYear', 'importTaiwan',
     'leaveTable', 'newLeaveUser', 'newLeaveDate', 'newLeaveHours', 'addLeave',
     'sprintNumber', 'sprintStart', 'sprintLength', 'saveSprint',
     'dbPath', 'changeDb', 'revealDb',
@@ -182,10 +183,11 @@ function openStatusDelete(status) {
 async function renderHolidays() {
   const holidays = (await UI.guard(() => API.listHolidays())) || [];
   UI.clear(dom.holidayTable);
-  const head = row('110px 1fr 28px');
+  const head = row('110px 1fr 84px 28px');
   head.classList.add('head');
   head.appendChild(UI.el('span', null, I18N.t('calendar.date')));
   head.appendChild(UI.el('span', null, I18N.t('calendar.name')));
+  head.appendChild(UI.el('span'));
   head.appendChild(UI.el('span'));
   dom.holidayTable.appendChild(head);
 
@@ -197,9 +199,16 @@ async function renderHolidays() {
   }
 
   holidays.forEach((holiday) => {
-    const line = row('110px 1fr 28px');
+    const line = row('110px 1fr 84px 28px');
     line.appendChild(UI.el('span', 'num', holiday.date));
     line.appendChild(UI.el('span', null, holiday.name));
+    line.appendChild(
+      UI.el(
+        'span',
+        holiday.is_workday ? 'badge short' : 'badge exact',
+        I18N.t(holiday.is_workday ? 'calendar.makeUp' : 'calendar.holiday')
+      )
+    );
     const remove = UI.el('button', 'btn icon danger', '✕');
     remove.addEventListener('click', async () => {
       await UI.guard(() => API.deleteHoliday(holiday.date));
@@ -208,6 +217,60 @@ async function renderHolidays() {
     line.appendChild(remove);
     dom.holidayTable.appendChild(line);
   });
+}
+
+function renderImportYears() {
+  const current = new Date().getFullYear();
+  const years = [current - 1, current, current + 1].map(String);
+  const keep = dom.importYear.value;
+  fillOptions(dom.importYear, years, (value) => value, keep || String(current));
+}
+
+const TAIWAN_CALENDAR_URL = 'https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data';
+
+function toHolidayRows(raw) {
+  const rows = [];
+  raw.forEach((day) => {
+    const text = String(day.date ?? '');
+    if (text.length !== 8) {
+      return;
+    }
+    const date = `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+    const weekend = day.week === '六' || day.week === '日';
+    const description = String(day.description ?? '').trim();
+
+    if (day.isHoliday && !weekend) {
+      rows.push({ date, name: description || I18N.t('calendar.holiday'), is_workday: false });
+    } else if (!day.isHoliday && weekend) {
+      rows.push({ date, name: description || I18N.t('calendar.makeUp'), is_workday: true });
+    }
+  });
+  return rows;
+}
+
+async function importTaiwanHolidays() {
+  const year = Number(dom.importYear.value);
+  dom.importTaiwan.disabled = true;
+  const original = dom.importTaiwan.textContent;
+  dom.importTaiwan.textContent = I18N.t('calendar.importing');
+
+  try {
+    const response = await fetch(`${TAIWAN_CALENDAR_URL}/${year}.json`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const rows = toHolidayRows(await response.json());
+    const count = await UI.guard(() => API.importHolidays(year, rows, true));
+    if (count !== undefined) {
+      UI.toast(I18N.t('calendar.imported', { n: count }));
+      await renderHolidays();
+    }
+  } catch (error) {
+    UI.toast(`${I18N.t('calendar.importFailed')}（${error}）`, true);
+  } finally {
+    dom.importTaiwan.disabled = false;
+    dom.importTaiwan.textContent = original;
+  }
 }
 
 async function renderLeaves() {
@@ -326,12 +389,17 @@ function bind() {
     if (!dom.newHolidayDate.value) {
       return;
     }
+    const isWorkday = dom.newHolidayWorkday.checked;
+    const fallback = I18N.t(isWorkday ? 'calendar.makeUp' : 'calendar.holiday');
     await UI.guard(() =>
-      API.saveHoliday(dom.newHolidayDate.value, dom.newHolidayName.value.trim() || dom.newHolidayDate.value)
+      API.saveHoliday(dom.newHolidayDate.value, dom.newHolidayName.value.trim() || fallback, isWorkday)
     );
     dom.newHolidayName.value = '';
+    dom.newHolidayWorkday.checked = false;
     await renderHolidays();
   });
+
+  dom.importTaiwan.addEventListener('click', () => importTaiwanHolidays());
 
   dom.addLeave.addEventListener('click', async () => {
     if (!dom.newLeaveUser.value || !dom.newLeaveDate.value) {
@@ -383,6 +451,7 @@ async function reload() {
   I18N.apply();
 
   renderGeneral();
+  renderImportYears();
   renderUsers();
   renderStatuses();
   await renderHolidays();

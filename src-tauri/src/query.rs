@@ -60,7 +60,7 @@ pub fn build_filter(query: &EntryQuery) -> (String, Vec<Value>) {
     (where_sql, params)
 }
 
-fn escape_like(value: &str) -> String {
+pub fn escape_like(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('%', "\\%")

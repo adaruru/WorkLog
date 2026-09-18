@@ -181,10 +181,8 @@ pub fn link_entries(state: State<AppState>, entry_id: i64, linked_entry_id: i64)
 }
 
 #[tauri::command]
-pub fn unlink_entries(state: State<AppState>, entry_id: i64, linked_entry_id: i64) -> Answer<()> {
-    with_conn(&state, |conn| {
-        store::unlink_entries(conn, entry_id, linked_entry_id)
-    })
+pub fn unlink_entry(state: State<AppState>, id: i64) -> Answer<()> {
+    with_conn(&state, |conn| store::unlink_entry(conn, id))
 }
 
 #[tauri::command]
@@ -193,12 +191,32 @@ pub fn list_holidays(state: State<AppState>) -> Answer<Vec<Holiday>> {
 }
 
 #[tauri::command]
-pub fn save_holiday(state: State<AppState>, date: String, name: String) -> Answer<()> {
+pub fn save_holiday(
+    state: State<AppState>,
+    date: String,
+    name: String,
+    is_workday: bool,
+) -> Answer<()> {
     if calendar::parse_date(date.trim()).is_none() {
         return Err("假日日期格式需為 yyyy-MM-dd".to_string());
     }
     with_conn(&state, |conn| {
-        store::save_holiday(conn, date.trim(), name.trim())
+        store::save_holiday(conn, date.trim(), name.trim(), is_workday)
+    })
+}
+
+#[tauri::command]
+pub fn import_holidays(
+    state: State<AppState>,
+    year: i32,
+    items: Vec<Holiday>,
+    replace: bool,
+) -> Answer<usize> {
+    with_conn(&state, |conn| {
+        if replace {
+            store::clear_holidays_in_year(conn, year)?;
+        }
+        store::import_holidays(conn, &items)
     })
 }
 
@@ -266,9 +284,19 @@ pub fn hours_report(
     })
 }
 
+fn native_theme(value: &str) -> tauri::Theme {
+    match value {
+        "light" => tauri::Theme::Light,
+        _ => tauri::Theme::Dark,
+    }
+}
+
 #[tauri::command]
-pub async fn open_settings_window(app: AppHandle) -> Answer<()> {
+pub async fn open_settings_window(app: AppHandle, theme: String) -> Answer<()> {
+    let native = native_theme(&theme);
+
     if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.set_theme(Some(native));
         let _ = window.show();
         let _ = window.set_focus();
         return Ok(());
@@ -282,8 +310,18 @@ pub async fn open_settings_window(app: AppHandle) -> Answer<()> {
     .title("WorkLog")
     .inner_size(560.0, 460.0)
     .min_inner_size(460.0, 380.0)
+    .theme(Some(native))
     .build()
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_window_theme(app: AppHandle, theme: String) -> Answer<()> {
+    let native = native_theme(&theme);
+    for window in app.webview_windows().values() {
+        let _ = window.set_theme(Some(native));
+    }
     Ok(())
 }
 
