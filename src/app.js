@@ -18,7 +18,7 @@ const dom = {};
 function cache() {
   const ids = [
     'keyword', 'rangeScope', 'dateFrom', 'dateTo', 'statusFilterBtn', 'userFilter',
-    'hoursBadge', 'settingsBtn', 'listCount', 'listHead', 'list', 'detailEmpty', 'detailForm',
+    'rangeShortBadge', 'hoursBadge', 'settingsBtn', 'listCount', 'listHead', 'list', 'detailEmpty', 'detailForm',
     'fContent', 'addLinkBtn', 'linksRelated',
     'statusDialog', 'statusChecks', 'statusDialogClose',
     'linkDialog', 'linkSearch', 'linkCandidates', 'linkDialogClose',
@@ -573,7 +573,44 @@ function badgeText(report) {
 
 const REMINDER_SCOPES = ['today', 'week', 'sprint'];
 
+async function refreshRangeBadge() {
+  const userId = selectedUserId();
+  const dateFrom = dom.dateFrom.value;
+  const dateTo = dom.dateTo.value;
+  const filtered = dom.keyword.value.trim() !== '' || state.statusFilter.size > 0;
+  if (userId === null || !dateFrom || !dateTo || filtered) {
+    dom.rangeShortBadge.hidden = true;
+    return;
+  }
+
+  const report = await UI.guard(() => API.hoursReport(userId, 'custom', dateFrom, dateTo));
+  if (!report) {
+    dom.rangeShortBadge.hidden = true;
+    return;
+  }
+
+  const diff = Math.round(report.diff * 100) / 100;
+  const total = UI.hours(report.filled);
+  let text;
+  let tone;
+  if (diff < 0) {
+    text = I18N.t('hours.rangeShort', { total, n: UI.hours(-diff) });
+    tone = 'short';
+  } else if (diff === 0) {
+    text = I18N.t('hours.rangeMet', { total });
+    tone = 'exact';
+  } else {
+    text = I18N.t('hours.rangeOver', { total, n: UI.hours(diff) });
+    tone = 'over';
+  }
+  dom.rangeShortBadge.textContent = text;
+  dom.rangeShortBadge.className = `badge static ${tone}`;
+  dom.rangeShortBadge.hidden = false;
+}
+
 async function refreshBadge() {
+  await refreshRangeBadge();
+
   const current = REMINDER_SCOPES.includes(state.settings.reminder_range)
     ? state.settings.reminder_range
     : 'week';

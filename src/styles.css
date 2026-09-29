@@ -287,6 +287,16 @@ select.input:hover {
   color: var(--text-dim);
 }
 
+.badge.static {
+  padding: 0 10px;
+  cursor: default;
+  background-image: none;
+}
+
+.badge.static[hidden] {
+  display: none;
+}
+
 .badge option {
   background: var(--bg-surface);
   color: var(--text);

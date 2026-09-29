@@ -97,7 +97,7 @@ function renderUsers() {
     hours.min = '0';
     hours.value = user.daily_required_hours;
     hours.addEventListener('change', async () => {
-      await UI.guard(() => API.updateUser(user.id, user.name, Number(hours.value) || 0, user.is_active));
+      await UI.guard(() => API.updateUser(user.id, user.name, Number(hours.value) || 8, user.is_active));
       await reload();
     });
 
@@ -121,6 +121,13 @@ function renderUsers() {
     state.users.map((user) => String(user.id)),
     (value) => state.users.find((user) => String(user.id) === value).name
   );
+  syncLeaveHours();
+}
+
+function syncLeaveHours() {
+  const user = state.users.find((item) => String(item.id) === dom.newLeaveUser.value);
+  const hours = user?.daily_required_hours;
+  dom.newLeaveHours.value = hours > 0 ? hours : 8;
 }
 
 function renderStatuses() {
@@ -412,6 +419,8 @@ function bind() {
   });
 
   dom.importTaiwan.addEventListener('click', () => importTaiwanHolidays());
+
+  dom.newLeaveUser.addEventListener('change', () => syncLeaveHours());
 
   dom.addLeave.addEventListener('click', async () => {
     if (!dom.newLeaveUser.value || !dom.newLeaveDate.value) {
