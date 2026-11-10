@@ -11,7 +11,21 @@ const state = {
   sortDir: 'desc'
 };
 
-const SCOPES = ['today', 'week', 'month', 'sprint', 'last_sprint', 'custom'];
+const SCOPES = [
+  'today',
+  'last_week',
+  'week',
+  'next_week',
+  'last_sprint',
+  'sprint',
+  'next_sprint',
+  'last_month',
+  'month',
+  'next_month',
+  'custom'
+];
+
+const SPRINT_SCOPES = ['last_sprint', 'sprint', 'next_sprint'];
 
 const dom = {};
 
@@ -550,7 +564,7 @@ function badgeText(report) {
   }
 
   let scope;
-  if (report.scope === 'sprint' || report.scope === 'last_sprint') {
+  if (SPRINT_SCOPES.includes(report.scope)) {
     scope =
       report.sprint_number === null
         ? I18N.t(`range.${report.scope}`)
@@ -785,8 +799,6 @@ function restoreFilter() {
     return false;
   }
   dom.keyword.value = saved.keyword ?? '';
-  dom.dateFrom.value = saved.dateFrom ?? '';
-  dom.dateTo.value = saved.dateTo ?? '';
   state.scope = SCOPES.includes(saved.scope) ? saved.scope : 'week';
   dom.rangeScope.value = state.scope;
   state.statusFilter = new Set(
@@ -799,9 +811,13 @@ function restoreFilter() {
     state.sortField = saved.sortField;
     state.sortDir = saved.sortDir === 'asc' ? 'asc' : 'desc';
   }
+  if (state.scope === 'custom') {
+    dom.dateFrom.value = saved.dateFrom ?? '';
+    dom.dateTo.value = saved.dateTo ?? '';
+  }
   renderStatusFilterButton();
   renderStatusChecks();
-  return Boolean(saved.dateFrom || saved.dateTo || state.scope === 'custom');
+  return state.scope === 'custom';
 }
 
 function applyLanguageAndTheme() {

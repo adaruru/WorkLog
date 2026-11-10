@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use chrono::Local;
 use rusqlite::{Connection, Result};
+
+use crate::store;
 
 pub const SCHEMA_VERSION: i64 = 3;
 
@@ -111,8 +114,21 @@ fn seed(conn: &Connection) -> Result<()> {
     let default_status_id: i64 =
         conn.query_row("SELECT id FROM statuses WHERE name = 'new'", [], |row| row.get(0))?;
 
-    let defaults: [(&str, String); 6] = [
+    let sprint_anchor = [
+        (
+            store::SPRINT_ANCHOR_NUMBER_KEY,
+            store::DEFAULT_SPRINT_ANCHOR_NUMBER.to_string(),
+        ),
+        (
+            store::SPRINT_ANCHOR_START_KEY,
+            store::default_sprint_anchor_start(Local::now().date_naive()),
+        ),
+    ];
+
+    let defaults: [(&str, String); 8] = [
         ("default_status_id", default_status_id.to_string()),
+        sprint_anchor[0].clone(),
+        sprint_anchor[1].clone(),
         ("sprint_length_days", "14".to_string()),
         ("reminder_range", "week".to_string()),
         ("language", "zh-TW".to_string()),
@@ -122,6 +138,13 @@ fn seed(conn: &Connection) -> Result<()> {
     for (key, value) in defaults {
         conn.execute(
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, value],
+        )?;
+    }
+
+    for (key, value) in sprint_anchor {
+        conn.execute(
+            "UPDATE app_settings SET value = ?2 WHERE key = ?1 AND TRIM(value) = ''",
             rusqlite::params![key, value],
         )?;
     }
@@ -263,6 +286,43 @@ mod tests {
             .query_row("SELECT id FROM statuses WHERE name = 'new'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(default_id, new_id.to_string());
+    }
+
+    #[test]
+    fn seeds_a_sprint_anchor_on_the_current_week_monday() {
+        let conn = open_in_memory().unwrap();
+        let setting = |key: &str| -> String {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let monday = crate::calendar::week_range(Local::now().date_naive()).0;
+        assert_eq!(
+            setting(store::SPRINT_ANCHOR_START_KEY),
+            crate::calendar::format_date(monday)
+        );
+        assert_eq!(
+            setting(store::SPRINT_ANCHOR_NUMBER_KEY),
+            store::DEFAULT_SPRINT_ANCHOR_NUMBER
+        );
+    }
+
+    #[test]
+    fn seeding_refills_a_sprint_anchor_that_was_cleared() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "UPDATE app_settings SET value = '' WHERE key IN (?1, ?2)",
+            rusqlite::params![store::SPRINT_ANCHOR_NUMBER_KEY, store::SPRINT_ANCHOR_START_KEY],
+        )
+        .unwrap();
+
+        seed(&conn).unwrap();
+
+        assert!(store::sprint_config(&conn).unwrap().is_some());
     }
 
     #[test]

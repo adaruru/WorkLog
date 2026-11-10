@@ -16,11 +16,30 @@ pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
     .optional()
 }
 
+pub const SPRINT_ANCHOR_NUMBER_KEY: &str = "sprint_anchor_number";
+pub const SPRINT_ANCHOR_START_KEY: &str = "sprint_anchor_start_date";
+pub const DEFAULT_SPRINT_ANCHOR_NUMBER: &str = "1";
+
+pub fn default_sprint_anchor_start(today: NaiveDate) -> String {
+    calendar::format_date(calendar::week_range(today).0)
+}
+
+fn filled_setting(key: &str, value: &str) -> String {
+    if !value.trim().is_empty() {
+        return value.to_string();
+    }
+    match key {
+        SPRINT_ANCHOR_NUMBER_KEY => DEFAULT_SPRINT_ANCHOR_NUMBER.to_string(),
+        SPRINT_ANCHOR_START_KEY => default_sprint_anchor_start(Local::now().date_naive()),
+        _ => value.to_string(),
+    }
+}
+
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![key, value],
+        params![key, filled_setting(key, value)],
     )?;
     Ok(())
 }
@@ -525,18 +544,34 @@ pub fn resolve_range(conn: &Connection, scope: &str, today: NaiveDate) -> Result
     let mut sprint_number = None;
     let (from, to) = match scope {
         "today" => (Some(today), Some(today)),
-        "week" => {
+        "last_week" | "week" | "next_week" => {
             let (start, end) = calendar::week_range(today);
+            let anchor = match scope {
+                "last_week" => start - chrono::Duration::days(1),
+                "next_week" => end + chrono::Duration::days(1),
+                _ => today,
+            };
+            let (start, end) = calendar::week_range(anchor);
             (Some(start), Some(end))
         }
-        "month" => {
+        "last_month" | "month" | "next_month" => {
             let (start, end) = calendar::month_range(today);
+            let anchor = match scope {
+                "last_month" => start - chrono::Duration::days(1),
+                "next_month" => end + chrono::Duration::days(1),
+                _ => today,
+            };
+            let (start, end) = calendar::month_range(anchor);
             (Some(start), Some(end))
         }
-        "sprint" | "last_sprint" => match sprint_config(conn)? {
+        "sprint" | "last_sprint" | "next_sprint" => match sprint_config(conn)? {
             Some(config) => {
                 let current = config.sprint_of(today);
-                let number = if scope == "sprint" { current } else { current - 1 };
+                let number = match scope {
+                    "last_sprint" => current - 1,
+                    "next_sprint" => current + 1,
+                    _ => current,
+                };
                 let (start, end) = config.range_of(number);
                 sprint_number = Some(number);
                 (Some(start), Some(end))
@@ -991,12 +1026,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_range_falls_back_when_sprint_is_not_configured() {
+    fn a_fresh_database_always_resolves_a_sprint_range() {
         let conn = setup();
-        let today = calendar::parse_date("2026-09-18").unwrap();
+        let today = Local::now().date_naive();
         let resolved = resolve_range(&conn, "sprint", today).unwrap();
-        assert!(resolved.from.is_none());
-        assert!(resolved.sprint_number.is_none());
+        assert_eq!(resolved.sprint_number, Some(1));
+        assert_eq!(resolved.from, Some(calendar::week_range(today).0));
+    }
+
+    #[test]
+    fn clearing_the_sprint_anchor_restores_the_default() {
+        let conn = setup();
+        set_setting(&conn, SPRINT_ANCHOR_NUMBER_KEY, "12").unwrap();
+        set_setting(&conn, SPRINT_ANCHOR_START_KEY, "2026-09-01").unwrap();
+
+        set_setting(&conn, SPRINT_ANCHOR_NUMBER_KEY, "").unwrap();
+        set_setting(&conn, SPRINT_ANCHOR_START_KEY, "   ").unwrap();
+
+        let config = sprint_config(&conn).unwrap().expect("基準應該被補回預設值");
+        assert_eq!(config.anchor_number, 1);
+        assert_eq!(
+            config.anchor_start,
+            calendar::week_range(Local::now().date_naive()).0
+        );
     }
 
     #[test]
@@ -1015,5 +1067,29 @@ mod tests {
         let previous = resolve_range(&conn, "last_sprint", today).unwrap();
         assert_eq!(previous.sprint_number, Some(12));
         assert_eq!(previous.from, calendar::parse_date("2026-09-01"));
+
+        let next = resolve_range(&conn, "next_sprint", today).unwrap();
+        assert_eq!(next.sprint_number, Some(14));
+        assert_eq!(next.from, calendar::parse_date("2026-09-29"));
+        assert_eq!(next.to, calendar::parse_date("2026-10-12"));
+    }
+
+    #[test]
+    fn resolve_range_handles_previous_current_and_next_week_and_month() {
+        let conn = setup();
+        let today = calendar::parse_date("2026-09-18").unwrap();
+
+        for (scope, from, to) in [
+            ("last_week", "2026-09-07", "2026-09-13"),
+            ("week", "2026-09-14", "2026-09-20"),
+            ("next_week", "2026-09-21", "2026-09-27"),
+            ("last_month", "2026-08-01", "2026-08-31"),
+            ("month", "2026-09-01", "2026-09-30"),
+            ("next_month", "2026-10-01", "2026-10-31"),
+        ] {
+            let resolved = resolve_range(&conn, scope, today).unwrap();
+            assert_eq!(resolved.from, calendar::parse_date(from), "{scope}");
+            assert_eq!(resolved.to, calendar::parse_date(to), "{scope}");
+        }
     }
 }
