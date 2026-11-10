@@ -182,22 +182,52 @@ cargo test -- --nocapture  讓 println! 的輸出顯示出來
 
 寫新測試時，純邏輯（日期、缺口、SQL 組裝）優先寫在 `calendar.rs` 與 `query.rs`，那兩個檔沒有 I/O，測起來最快也最穩。
 
-## 6. 建置正式版
+## 6. 建置正式版（＝「發布」）
 
-```
-cd src-tauri
-cargo tauri build
-```
+> 「幫我發布」就是指這一節：**建置正式版，並保留既有 db**。兩件事缺一不可。
+
+### 6.1 發布步驟
+
+1. 確認 app 沒在跑。正式版關掉視窗只是縮到系統匣、程式還活著，會鎖住 exe 讓 build 失敗（見 4.4）。
+
+   ```powershell
+   Get-Process -Name worklog -ErrorAction SilentlyContinue
+   # 還在跑就結束它
+   Stop-Process -Name worklog -Force
+   ```
+
+2. 備份既有 db。預設路徑是 exe 同目錄的 `src-tauri/target/release/worklog.db`。
+
+   ```powershell
+   Copy-Item src-tauri\target\release\worklog.db .odin\tmp\worklog.db.backup
+   ```
+
+3. 建置。
+
+   ```
+   cd src-tauri
+   cargo tauri build
+   ```
+
+4. 驗證 exe 的時間戳有更新、db 的大小與時間戳沒變。
 
 產物：
 
 ```
-src-tauri/target/release/WorkLog.exe
+src-tauri/target/release/worklog.exe
 ```
 
 這支 exe 就是完整的程式，雙擊即開，不需要安裝、不需要額外的 DLL、不會產生安裝程式（`tauri.conf.json` 裡 `bundle.active` 是 `false`）。
 
-發佈時把 exe 複製到任何資料夾即可，第一次執行會在它旁邊建 `worklog.db`。
+把 exe 複製到任何資料夾即可，第一次執行會在它旁邊建 `worklog.db`。
+
+### 6.2 既有 db 為什麼安全
+
+`worklog.db` 不是 build 產物，cargo 只覆寫自己產生的檔案，所以 `cargo tauri build` 不會動它——同一個資料夾裡的 exe 換新、db 原封不動。
+
+**發布流程不跑 `cargo clean`。** 它會刪掉整個 `target/`，裡面的 `worklog.db` 會一起不見。要清建置快取時先把 db 移到別處。
+
+db 的實際路徑是先讀 `app_settings` 的 `db_path`，沒有設定才用 exe 同目錄（`src-tauri/src/db.rs:75`、`src-tauri/src/main.rs:18`）。在設定頁切換過路徑的話，備份要備那個路徑的檔案。
 
 ## 7. 怎麼使用
 

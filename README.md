@@ -44,7 +44,7 @@ cd src-tauri
 cargo tauri build
 ```
 
-產物在 `src-tauri/target/release/WorkLog.exe`，單一檔案、雙擊即開，不產生安裝程式。
+產物在 `src-tauri/target/release/worklog.exe`，單一檔案、雙擊即開，不產生安裝程式。
 
 ## 資料庫
 
