@@ -63,11 +63,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - [x] `store.rs`：新增 `clearing_the_sprint_anchor_restores_the_default`
 - [x] `db.rs`：新增 `seeds_a_sprint_anchor_on_the_current_week_monday`
 - [x] `db.rs`：新增 `seeding_refills_a_sprint_anchor_that_was_cleared`
-- [ ] 四個新測試尚未執行驗證（依慣例 agent 不跑 build／test）
-
-### 阻塞事項
-
-- [ ] 目前無阻塞事項
+- [x] 以 cargo test 驗證新增與改寫的測試
 
 ## Spec
 
@@ -140,6 +136,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - 設定頁直接把輸入框的值存進去、不做驗證（`src/settings.js:442`～`444`、`src-tauri/src/commands.rs:68`），所以空值防線放在 `set_setting` 的 `filled_setting`（`src-tauri/src/store.rs:27`），這樣不必等重開 app。
 - 預設基準為「本週一、編號 1」，因此早於本週一的日期會算出 sprint 0、-1、-2 等負編號。三個顯示點都不會露出：下拉用「上個 sprint」不帶編號、`hours.sprint {n}` 只會收到當前 sprint（今天必定落在 sprint 1）、`#rangeShortBadge` 不顯示 sprint 字樣。
 - `sprint_length_days` 早已有 14 的預設與 fallback（`src-tauri/src/store.rs` 的 `sprint_settings`），本次未改。
+- 新增與改寫的測試已以 `cargo test` 執行：全套 75 passed、0 failed，四個新測試全綠。
 
 ### 既有缺陷（本次只記錄，未修）
 
