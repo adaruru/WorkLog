@@ -50,10 +50,6 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - [x] `settings.js`：`syncLeaveHours()` 中 `daily_required_hours` 大於 0 才採用，否則回填 `8`
 - [x] `settings.js`：使用者分頁修改每日必填工時，輸入 0 或清空時存成 `8`
 
-### 阻塞事項
-
-- [ ] 目前無阻塞事項
-
 ## Spec
 
 ### PMSpec
@@ -118,4 +114,3 @@ syncLeaveHours()  ──▶  [#newLeaveHours] = daily_required_hours（為 0 時
 
 ## Wait Decision
 
-目前無待確認事項。

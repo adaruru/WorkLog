@@ -55,10 +55,6 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - [x] `i18n.js`：兩份字典各加 `hours.rangeMet`（`總計 {total} 小時，已達標`／`{total}h total · on target`）
 - [x] `i18n.js`：兩份字典各加 `hours.rangeOver`（`總計 {total} 小時 超出 {n} 小時`／`{total}h total · {n}h over`）
 
-### 阻塞事項
-
-- [ ] 目前無阻塞事項
-
 ## Spec
 
 ### PMSpec
@@ -140,4 +136,3 @@ store::hours_report → calendar::summarize
 
 ## Wait Decision
 
-目前無待確認事項。

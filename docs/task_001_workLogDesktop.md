@@ -178,10 +178,6 @@ Activate
 - [x] 資料層整合測試：schema 初始化、刪除使用者轉無主、刪除狀態改掛替代狀態
 - [x] 每次改完 Rust 端跑 `cargo test`（50 passed / 0 failed）
 
-### 阻塞事項
-
-- 目前無阻塞事項
-
 ## Spec
 
 ### PMSpec
@@ -509,4 +505,3 @@ Activate
 
 ## Wait Decision
 
-目前無待確認事項。
