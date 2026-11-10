@@ -196,11 +196,15 @@ cargo test -- --nocapture  讓 println! 的輸出顯示出來
    Stop-Process -Name worklog -Force
    ```
 
-2. 備份既有 db。預設路徑是 exe 同目錄的 `src-tauri/target/release/worklog.db`。
+2. 備份既有 db。來源是 exe 同目錄的 `src-tauri/target/release/worklog.db`，備份放 repo 根目錄的 `.odin/tmp/`，檔名帶時間戳。
 
    ```powershell
-   Copy-Item src-tauri\target\release\worklog.db .odin\tmp\worklog.db.backup
+   Copy-Item src-tauri\target\release\worklog.db ".odin\tmp\worklog.db.backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
    ```
+
+   備份路徑固定用 `.odin/tmp/`：那個資料夾裡有一個內容只有 `*` 的 `.gitignore`，所以備份不會被 git 追蹤、不會誤 commit 進版控。檔名帶時間戳是為了不蓋掉前一次的備份。
+
+   `.odin/tmp/` 會自動清掉 7 天沒修改的檔案，所以那裡的備份只當「這次發布出事可以還原」用。要長期保留的資料庫快照，複製到 repo 外面自己的資料夾。
 
 3. 建置。
 
@@ -209,7 +213,13 @@ cargo test -- --nocapture  讓 println! 的輸出顯示出來
    cargo tauri build
    ```
 
-4. 驗證 exe 的時間戳有更新、db 的大小與時間戳沒變。
+4. 驗證 exe 的時間戳有更新，db 與備份仍然逐位元一致。
+
+   ```powershell
+   Get-Item src-tauri\target\release\worklog.exe | Select-Object LastWriteTime, Length
+   $backup = Get-ChildItem .odin\tmp\worklog.db.backup-* | Sort-Object LastWriteTime | Select-Object -Last 1
+   (Get-FileHash src-tauri\target\release\worklog.db).Hash -eq (Get-FileHash $backup).Hash
+   ```
 
 產物：
 
