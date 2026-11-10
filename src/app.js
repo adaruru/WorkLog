@@ -57,16 +57,30 @@ function selectedUserId() {
 }
 
 function currentQuery() {
+  const keyword = dom.keyword.value;
+  const sort = { sort_field: state.sortField, sort_dir: state.sortDir };
+
+  if (keyword.trim() !== '') {
+    return {
+      keyword,
+      date_from: '',
+      date_to: '',
+      status_ids: [],
+      user_filter: 'any',
+      user_id: null,
+      ...sort
+    };
+  }
+
   const value = dom.userFilter.value;
   return {
-    keyword: dom.keyword.value,
+    keyword,
     date_from: dom.dateFrom.value,
     date_to: dom.dateTo.value,
     status_ids: [...state.statusFilter],
     user_filter: value === 'any' ? 'any' : value === 'unowned' ? 'unowned' : 'one',
     user_id: selectedUserId(),
-    sort_field: state.sortField,
-    sort_dir: state.sortDir
+    ...sort
   };
 }
 
