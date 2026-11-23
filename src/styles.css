@@ -661,6 +661,10 @@ textarea.input {
   padding: 16px;
 }
 
+.empty.list-empty {
+  height: auto;
+}
+
 .empty svg {
   opacity: 0.5;
 }

@@ -86,7 +86,14 @@ function renderUsers() {
     name.className = 'input';
     name.value = user.name;
     name.addEventListener('change', async () => {
-      await UI.guard(() => API.updateUser(user.id, name.value, user.daily_required_hours, user.is_active));
+      const before = userStateOf(user);
+      const after = { ...before, name: name.value };
+      await UI.guard(() =>
+        API.updateUser(user.id, after.name, after.daily_required_hours, after.is_active)
+      );
+      if (before.name !== after.name) {
+        pushHistory([{ kind: 'user', op: 'update', id: user.id, before, after }]);
+      }
       await reload();
     });
 
@@ -97,7 +104,14 @@ function renderUsers() {
     hours.min = '0';
     hours.value = user.daily_required_hours;
     hours.addEventListener('change', async () => {
-      await UI.guard(() => API.updateUser(user.id, user.name, Number(hours.value) || 8, user.is_active));
+      const before = userStateOf(user);
+      const after = { ...before, daily_required_hours: Number(hours.value) || 8 };
+      await UI.guard(() =>
+        API.updateUser(user.id, after.name, after.daily_required_hours, after.is_active)
+      );
+      if (before.daily_required_hours !== after.daily_required_hours) {
+        pushHistory([{ kind: 'user', op: 'update', id: user.id, before, after }]);
+      }
       await reload();
     });
 
@@ -107,6 +121,7 @@ function renderUsers() {
         return;
       }
       await UI.guard(() => API.deleteUser(user.id));
+      clearHistory();
       await reload();
     });
 
@@ -154,7 +169,12 @@ function renderStatuses() {
     name.className = 'input';
     name.value = status.name;
     name.addEventListener('change', async () => {
-      await UI.guard(() => API.updateStatus(status.id, name.value, status.color));
+      const before = statusStateOf(status);
+      const after = { ...before, name: name.value };
+      await UI.guard(() => API.updateStatus(status.id, after.name, after.color));
+      if (before.name !== after.name) {
+        pushHistory([{ kind: 'status', op: 'update', id: status.id, before, after }]);
+      }
       await reload();
     });
 
@@ -163,7 +183,12 @@ function renderStatuses() {
     color.type = 'color';
     color.value = status.color;
     color.addEventListener('change', async () => {
-      await UI.guard(() => API.updateStatus(status.id, status.name, color.value));
+      const before = statusStateOf(status);
+      const after = { ...before, color: color.value };
+      await UI.guard(() => API.updateStatus(status.id, after.name, after.color));
+      if (before.color !== after.color) {
+        pushHistory([{ kind: 'status', op: 'update', id: status.id, before, after }]);
+      }
       await reload();
     });
 
@@ -226,6 +251,7 @@ async function renderHolidays() {
     const remove = UI.el('button', 'btn icon danger', '✕');
     remove.addEventListener('click', async () => {
       await UI.guard(() => API.deleteHoliday(holiday.date));
+      clearHistory();
       await renderHolidays();
     });
     line.appendChild(remove);
@@ -274,8 +300,13 @@ async function importTaiwanHolidays() {
       throw new Error(`HTTP ${response.status}`);
     }
     const rows = toHolidayRows(await response.json());
+    const before = ((await UI.guard(() => API.listHolidays())) || [])
+      .filter((item) => item.date.startsWith(`${year}-`))
+      .map((item) => ({ date: item.date, name: item.name, is_workday: item.is_workday }));
+
     const count = await UI.guard(() => API.importHolidays(year, rows, true));
     if (count !== undefined) {
+      pushHistory([{ kind: 'holidayImport', year, before, after: rows }]);
       UI.toast(I18N.t('calendar.imported', { n: count }));
       await renderHolidays();
     }
@@ -313,6 +344,7 @@ async function renderLeaves() {
     const remove = UI.el('button', 'btn icon danger', '✕');
     remove.addEventListener('click', async () => {
       await UI.guard(() => API.deleteLeave(leave.id));
+      clearHistory();
       await renderLeaves();
     });
     line.appendChild(remove);
@@ -348,50 +380,100 @@ function bindTabs() {
   });
 }
 
+function pushHistory(changes) {
+  Bridge.send('main', HISTORY_EVENT.push, { changes });
+}
+
+function clearHistory() {
+  Bridge.send('main', HISTORY_EVENT.clear);
+}
+
+function settingChange(key, before, after) {
+  return { kind: 'setting', key, before: before ?? '', after };
+}
+
+function userStateOf(user) {
+  return {
+    name: user.name,
+    daily_required_hours: user.daily_required_hours,
+    is_active: user.is_active
+  };
+}
+
+function statusStateOf(status) {
+  return { name: status.name, color: status.color };
+}
+
+async function holidayAt(date) {
+  const rows = (await UI.guard(() => API.listHolidays())) || [];
+  const found = rows.find((item) => item.date === date);
+  return found ? { name: found.name, is_workday: found.is_workday } : null;
+}
+
+async function latestLeaveId(leave) {
+  const rows = (await UI.guard(() => API.listLeaves(null))) || [];
+  const matches = rows.filter(
+    (item) => item.user_id === leave.user_id && item.leave_date === leave.leave_date
+  );
+  return matches.length > 0 ? Math.max(...matches.map((item) => item.id)) : null;
+}
+
 function bind() {
   bindTabs();
 
-  dom.language.addEventListener('change', async () => {
-    await UI.guard(() => API.setSetting('language', dom.language.value));
-    await reload();
-  });
+  const bindSetting = (node, key) => {
+    node.addEventListener('change', async () => {
+      const before = state.settings[key];
+      const after = node.value;
+      await UI.guard(() => API.setSetting(key, after));
+      if (before !== after) {
+        pushHistory([settingChange(key, before, after)]);
+      }
+      await reload();
+    });
+  };
 
-  dom.theme.addEventListener('change', async () => {
-    await UI.guard(() => API.setSetting('theme', dom.theme.value));
-    await reload();
-  });
-
-  dom.density.addEventListener('change', async () => {
-    await UI.guard(() => API.setSetting('density', dom.density.value));
-    await reload();
-  });
-
-  dom.reminderRange.addEventListener('change', async () => {
-    await UI.guard(() => API.setSetting('reminder_range', dom.reminderRange.value));
-    await reload();
-  });
+  bindSetting(dom.language, 'language');
+  bindSetting(dom.theme, 'theme');
+  bindSetting(dom.density, 'density');
+  bindSetting(dom.reminderRange, 'reminder_range');
 
   dom.addUser.addEventListener('click', async () => {
     const name = dom.newUserName.value.trim();
     if (!name) {
       return;
     }
-    await UI.guard(() => API.createUser(name, Number(dom.newUserHours.value) || 8));
+    const hours = Number(dom.newUserHours.value) || 8;
+    const id = await UI.guard(() => API.createUser(name, hours));
+    if (id !== undefined) {
+      pushHistory([
+        {
+          kind: 'user',
+          op: 'create',
+          id,
+          before: null,
+          after: { name, daily_required_hours: hours, is_active: true }
+        }
+      ]);
+    }
     dom.newUserName.value = '';
     await reload();
   });
 
-  dom.defaultStatus.addEventListener('change', async () => {
-    await UI.guard(() => API.setSetting('default_status_id', dom.defaultStatus.value));
-    await reload();
-  });
+  bindSetting(dom.defaultStatus, 'default_status_id');
 
   dom.addStatus.addEventListener('click', async () => {
     const name = dom.newStatusName.value.trim();
     if (!name) {
       return;
     }
-    await UI.guard(() => API.createStatus(name, dom.newStatusColor.value));
+    const color = dom.newStatusColor.value;
+    const id = await UI.guard(() => API.createStatus(name, color));
+    if (id !== undefined) {
+      pushHistory([
+        { kind: 'status', op: 'create', id, before: null, after: { name, color } }
+      ]);
+    }
     dom.newStatusName.value = '';
     await reload();
   });
@@ -400,6 +482,7 @@ function bind() {
   dom.statusDeleteConfirm.addEventListener('click', async () => {
     const replacement = Number(dom.replacementStatus.value);
     await UI.guard(() => API.deleteStatus(state.pendingDelete, replacement));
+    clearHistory();
     dom.statusDeleteDialog.close();
     await reload();
   });
@@ -408,11 +491,13 @@ function bind() {
     if (!dom.newHolidayDate.value) {
       return;
     }
+    const date = dom.newHolidayDate.value;
     const isWorkday = dom.newHolidayWorkday.checked;
     const fallback = I18N.t(isWorkday ? 'calendar.makeUp' : 'calendar.holiday');
-    await UI.guard(() =>
-      API.saveHoliday(dom.newHolidayDate.value, dom.newHolidayName.value.trim() || fallback, isWorkday)
-    );
+    const after = { name: dom.newHolidayName.value.trim() || fallback, is_workday: isWorkday };
+    const before = await holidayAt(date);
+    await UI.guard(() => API.saveHoliday(date, after.name, after.is_workday));
+    pushHistory([{ kind: 'holiday', date, before, after }]);
     dom.newHolidayName.value = '';
     dom.newHolidayWorkday.checked = false;
     await renderHolidays();
@@ -426,22 +511,50 @@ function bind() {
     if (!dom.newLeaveUser.value || !dom.newLeaveDate.value) {
       return;
     }
-    await UI.guard(() =>
-      API.saveLeave(
-        null,
-        Number(dom.newLeaveUser.value),
-        dom.newLeaveDate.value,
-        Number(dom.newLeaveHours.value) || 0,
-        ''
-      )
+    const after = {
+      user_id: Number(dom.newLeaveUser.value),
+      leave_date: dom.newLeaveDate.value,
+      hours: Number(dom.newLeaveHours.value) || 0,
+      note: ''
+    };
+    const done = await UI.guard(() =>
+      API.saveLeave(null, after.user_id, after.leave_date, after.hours, after.note)
     );
+    if (done !== undefined) {
+      const id = await latestLeaveId(after);
+      if (id !== null) {
+        pushHistory([{ kind: 'leave', op: 'create', id, before: null, after }]);
+      }
+    }
     await renderLeaves();
   });
 
   dom.saveSprint.addEventListener('click', async () => {
-    await UI.guard(() => API.setSetting('sprint_anchor_number', dom.sprintNumber.value.trim()));
-    await UI.guard(() => API.setSetting('sprint_anchor_start_date', dom.sprintStart.value));
-    await UI.guard(() => API.setSetting('sprint_length_days', dom.sprintLength.value.trim() || '14'));
+    const changes = [
+      settingChange(
+        'sprint_anchor_number',
+        state.settings.sprint_anchor_number,
+        dom.sprintNumber.value.trim()
+      ),
+      settingChange(
+        'sprint_anchor_start_date',
+        state.settings.sprint_anchor_start_date,
+        dom.sprintStart.value
+      ),
+      settingChange(
+        'sprint_length_days',
+        state.settings.sprint_length_days,
+        dom.sprintLength.value.trim() || '14'
+      )
+    ];
+
+    for (const change of changes) {
+      await UI.guard(() => API.setSetting(change.key, change.after));
+    }
+    if (changes.some((change) => change.before !== change.after)) {
+      pushHistory(changes);
+    }
+
     UI.toast(I18N.t('toast.saved'));
     await reload();
   });
@@ -455,6 +568,16 @@ function bind() {
   });
 
   dom.revealDb.addEventListener('click', () => UI.guard(() => API.revealDbFolder()));
+
+  document.addEventListener('keydown', (event) => {
+    const action = historyShortcut(event);
+    if (action) {
+      event.preventDefault();
+      Bridge.send('main', action === 'undo' ? HISTORY_EVENT.undo : HISTORY_EVENT.redo);
+    }
+  });
+
+  Bridge.on(HISTORY_EVENT.changed, () => reload());
 }
 
 async function reload() {

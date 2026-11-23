@@ -8,7 +8,8 @@ const state = {
   statusFilter: new Set(),
   scope: 'week',
   sortField: 'work_date',
-  sortDir: 'desc'
+  sortDir: 'desc',
+  applyingHistory: false
 };
 
 const SCOPES = [
@@ -219,7 +220,16 @@ function buildDisplayRow(entry) {
   status.addEventListener('click', (event) => event.stopPropagation());
   status.addEventListener('change', async (event) => {
     event.stopPropagation();
-    await UI.guard(() => API.setEntryStatus(entry.id, Number(status.value)));
+    const before = entry.status_id;
+    const after = Number(status.value);
+    await UI.guard(() => API.setEntryStatus(entry.id, after));
+    if (!state.applyingHistory && before !== after) {
+      History.push({
+        changes: [
+          { kind: 'entryStatus', id: entry.id, guard: entry.updated_at, before, after }
+        ]
+      });
+    }
     await refresh();
   });
   row.appendChild(status);
@@ -347,7 +357,7 @@ function renderList() {
 
   if (state.entries.length === 0) {
     UI.clear(dom.list);
-    const empty = UI.el('div', 'empty');
+    const empty = UI.el('div', 'empty list-empty');
     empty.appendChild(UI.el('span', null, I18N.t('empty.list')));
     dom.list.appendChild(empty);
     dom.list.appendChild(buildAddButton());
@@ -396,7 +406,13 @@ function renderLinks(items) {
     remove.title = I18N.t('links.remove');
     remove.addEventListener('click', async (event) => {
       event.stopPropagation();
+      const groupOwner = state.selectedId;
       await UI.guard(() => API.unlinkEntry(item.id));
+      if (!state.applyingHistory) {
+        History.push({
+          changes: [{ kind: 'link', id: item.id, before: groupOwner, after: null }]
+        });
+      }
       await loadDetail(state.selectedId);
     });
     row.appendChild(remove);
@@ -422,6 +438,19 @@ async function loadDetail(id) {
   dom.fContent.value = detail.entry.content;
   renderLinks(detail.related);
   showForm(true);
+}
+
+function entryInputOf(entry) {
+  return {
+    id: entry.id,
+    user_id: entry.user_id,
+    title: entry.title,
+    content: entry.content ?? '',
+    ticket: entry.ticket,
+    status_id: entry.status_id,
+    work_date: entry.work_date,
+    hours: entry.hours
+  };
 }
 
 function collectInput() {
@@ -453,9 +482,20 @@ async function saveSelected() {
   if (!payload.work_date) {
     payload.work_date = UI.today();
   }
+
+  const previous = state.entries.find((item) => item.id === payload.id);
+  const before = previous ? entryInputOf(previous) : null;
+  const guard = previous ? previous.updated_at : null;
+
   const id = await UI.guard(() => API.saveEntry(payload));
   if (id === undefined) {
     return;
+  }
+
+  if (before && !state.applyingHistory && JSON.stringify(before) !== JSON.stringify(payload)) {
+    History.push({
+      changes: [{ kind: 'entry', id, guard, before, after: { ...payload } }]
+    });
   }
 
   const entry = state.entries.find((item) => item.id === id);
@@ -505,7 +545,20 @@ async function createEntry(title, options = {}) {
   if (id === undefined) {
     return;
   }
+
+  if (!state.applyingHistory) {
+    History.push({
+      changes: [{ kind: 'entryCreate', id, before: null, after: { ...payload } }]
+    });
+  }
+
   await refresh(id);
+
+  if (!state.entries.some((entry) => entry.id === id)) {
+    relaxFilters();
+    await refresh(id);
+    UI.toast(I18N.t('toast.filterRelaxed'));
+  }
   scrollToSelected();
 
   if (options.focusTitle) {
@@ -522,6 +575,7 @@ async function removeEntry(id) {
     return;
   }
   await UI.guard(() => API.deleteEntry(id));
+  History.clear();
   state.selectedId = null;
   state.editingId = null;
   showForm(false);
@@ -549,13 +603,17 @@ function stopEditing() {
   refresh();
 }
 
+function relaxFilters() {
+  dom.keyword.value = '';
+  state.statusFilter.clear();
+  renderStatusFilterButton();
+  renderStatusChecks();
+}
+
 async function navigateTo(id) {
   const visible = state.entries.some((entry) => entry.id === id);
   if (!visible) {
-    dom.keyword.value = '';
-    state.statusFilter.clear();
-    renderStatusFilterButton();
-    renderStatusChecks();
+    relaxFilters();
     await refresh(id);
     UI.toast(I18N.t('toast.filterRelaxed'));
     scrollToSelected();
@@ -736,7 +794,13 @@ async function renderCandidates() {
     row.appendChild(UI.el('span', 'link-title', item.title));
     row.appendChild(UI.el('span', 'link-meta', item.work_date));
     row.addEventListener('click', async () => {
-      await UI.guard(() => API.linkEntries(state.selectedId, item.id));
+      const groupOwner = state.selectedId;
+      await UI.guard(() => API.linkEntries(groupOwner, item.id));
+      if (!state.applyingHistory) {
+        History.push({
+          changes: [{ kind: 'link', id: item.id, before: null, after: groupOwner }]
+        });
+      }
       dom.linkDialog.close();
       await loadDetail(state.selectedId);
     });
@@ -792,6 +856,185 @@ function bindSplitter() {
   });
 }
 
+function applyFilterSnapshot(snapshot) {
+  dom.keyword.value = snapshot.keyword ?? '';
+  state.scope = SCOPES.includes(snapshot.scope) ? snapshot.scope : 'week';
+  dom.rangeScope.value = state.scope;
+  dom.dateFrom.value = snapshot.dateFrom ?? '';
+  dom.dateTo.value = snapshot.dateTo ?? '';
+  state.statusFilter = new Set(
+    (snapshot.statusIds ?? []).filter((id) => state.statuses.some((status) => status.id === id))
+  );
+  if (snapshot.user && [...dom.userFilter.options].some((item) => item.value === snapshot.user)) {
+    dom.userFilter.value = snapshot.user;
+  }
+  if (SORT_COLUMNS.some((column) => column.field === snapshot.sortField)) {
+    state.sortField = snapshot.sortField;
+    state.sortDir = snapshot.sortDir === 'asc' ? 'asc' : 'desc';
+  }
+  renderStatusFilterButton();
+  renderStatusChecks();
+}
+
+async function entryUnchanged(change) {
+  if (!change.guard) {
+    return true;
+  }
+  const detail = await UI.guard(() => API.entryDetail(change.id));
+  return Boolean(detail) && detail.entry.updated_at === change.guard;
+}
+
+async function applyChange(change, side) {
+  const value = change[side];
+
+  switch (change.kind) {
+    case 'filter':
+      applyFilterSnapshot(value);
+      return true;
+
+    case 'entry':
+      if (!(await entryUnchanged(change))) {
+        return false;
+      }
+      await UI.guard(() => API.saveEntry(value));
+      return true;
+
+    case 'entryStatus':
+      if (!(await entryUnchanged(change))) {
+        return false;
+      }
+      await UI.guard(() => API.setEntryStatus(change.id, value));
+      return true;
+
+    case 'entryCreate':
+      if (side === 'before') {
+        await UI.guard(() => API.deleteEntry(change.id));
+      } else {
+        const id = await UI.guard(() => API.saveEntry({ ...value, id: null }));
+        if (id !== undefined) {
+          change.id = id;
+        }
+      }
+      return true;
+
+    case 'link':
+      if (value === null) {
+        await UI.guard(() => API.unlinkEntry(change.id));
+      } else {
+        await UI.guard(() => API.linkEntries(value, change.id));
+      }
+      return true;
+
+    case 'setting':
+      await UI.guard(() => API.setSetting(change.key, value));
+      return true;
+
+    case 'user':
+      if (value === null) {
+        await UI.guard(() => API.deleteUser(change.id));
+      } else if (change.op === 'create') {
+        const userId = await UI.guard(() =>
+          API.createUser(value.name, value.daily_required_hours)
+        );
+        if (userId !== undefined) {
+          change.id = userId;
+        }
+      } else {
+        await UI.guard(() =>
+          API.updateUser(change.id, value.name, value.daily_required_hours, value.is_active)
+        );
+      }
+      return true;
+
+    case 'status':
+      if (value === null) {
+        await UI.guard(() => API.deleteStatus(change.id, change.replacementId));
+      } else if (change.op === 'create') {
+        const statusId = await UI.guard(() => API.createStatus(value.name, value.color));
+        if (statusId !== undefined) {
+          change.id = statusId;
+        }
+      } else {
+        await UI.guard(() => API.updateStatus(change.id, value.name, value.color));
+      }
+      return true;
+
+    case 'holiday':
+      if (value === null) {
+        await UI.guard(() => API.deleteHoliday(change.date));
+      } else {
+        await UI.guard(() => API.saveHoliday(change.date, value.name, value.is_workday));
+      }
+      return true;
+
+    case 'holidayImport':
+      await UI.guard(() => API.importHolidays(change.year, value, true));
+      return true;
+
+    case 'leave':
+      if (value === null) {
+        await UI.guard(() => API.deleteLeave(change.id));
+      } else if (change.op === 'create') {
+        const leaveId = await UI.guard(() =>
+          API.saveLeave(null, value.user_id, value.leave_date, value.hours, value.note)
+        );
+        if (leaveId !== undefined) {
+          change.id = leaveId;
+        }
+      } else {
+        await UI.guard(() =>
+          API.saveLeave(change.id, value.user_id, value.leave_date, value.hours, value.note)
+        );
+      }
+      return true;
+
+    default:
+      return true;
+  }
+}
+
+async function applyHistoryItem(item, side) {
+  state.applyingHistory = true;
+  let conflict = false;
+  try {
+    const changes = side === 'before' ? [...item.changes].reverse() : item.changes;
+    for (const change of changes) {
+      if ((await applyChange(change, side)) === false) {
+        conflict = true;
+      }
+    }
+  } finally {
+    state.applyingHistory = false;
+  }
+
+  await reloadSettings();
+  await Bridge.send('settings', HISTORY_EVENT.changed);
+
+  if (conflict) {
+    UI.toast(I18N.t('history.conflict'), true);
+    return;
+  }
+  UI.toast(I18N.t(side === 'before' ? 'history.undone' : 'history.redone'));
+}
+
+async function runUndo() {
+  const item = History.takeUndo();
+  if (!item) {
+    UI.toast(I18N.t('history.undoEmpty'));
+    return;
+  }
+  await applyHistoryItem(item, 'before');
+}
+
+async function runRedo() {
+  const item = History.takeRedo();
+  if (!item) {
+    UI.toast(I18N.t('history.redoEmpty'));
+    return;
+  }
+  await applyHistoryItem(item, 'after');
+}
+
 function rememberFilter() {
   const payload = JSON.stringify({
     keyword: dom.keyword.value,
@@ -803,6 +1046,14 @@ function rememberFilter() {
     sortField: state.sortField,
     sortDir: state.sortDir
   });
+
+  const previous = state.settings.last_filter;
+  if (!state.applyingHistory && previous && previous !== payload) {
+    History.push({
+      changes: [{ kind: 'filter', before: parseJson(previous, {}), after: parseJson(payload, {}) }]
+    });
+  }
+
   state.settings.last_filter = payload;
   UI.guard(() => API.setSetting('last_filter', payload));
 }
@@ -897,8 +1148,27 @@ function bind() {
     if (event.ctrlKey && event.key === 'n') {
       event.preventDefault();
       createEntry('', { focusTitle: true });
+      return;
+    }
+    const action = historyShortcut(event);
+    if (action) {
+      event.preventDefault();
+      if (action === 'undo') {
+        runUndo();
+      } else {
+        runRedo();
+      }
     }
   });
+
+  Bridge.on(HISTORY_EVENT.push, (payload) => {
+    if (payload && Array.isArray(payload.changes)) {
+      History.push(payload);
+    }
+  });
+  Bridge.on(HISTORY_EVENT.undo, () => runUndo());
+  Bridge.on(HISTORY_EVENT.redo, () => runRedo());
+  Bridge.on(HISTORY_EVENT.clear, () => History.clear());
 }
 
 async function reloadSettings() {
