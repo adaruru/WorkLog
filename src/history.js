@@ -8,8 +8,18 @@ const HISTORY_EVENT = {
   changed: 'worklog://history-changed'
 };
 
-function isFilterOnly(item) {
-  return item.changes.length === 1 && item.changes[0].kind === 'filter';
+function sameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function singleFilterField(item) {
+  if (item.changes.length !== 1 || item.changes[0].kind !== 'filter') {
+    return null;
+  }
+  const { before, after } = item.changes[0];
+  const names = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  const moved = [...names].filter((name) => !sameValue((before || {})[name], (after || {})[name]));
+  return moved.length === 1 ? moved[0] : null;
 }
 
 const History = {
@@ -18,8 +28,13 @@ const History = {
 
   push(item) {
     const last = this.undoStack[this.undoStack.length - 1];
-    if (last && isFilterOnly(last) && isFilterOnly(item)) {
+    const field = singleFilterField(item);
+
+    if (last && field && singleFilterField(last) === field) {
       last.changes[0].after = item.changes[0].after;
+      if (sameValue(last.changes[0].before, last.changes[0].after)) {
+        this.undoStack.pop();
+      }
     } else {
       this.undoStack.push(item);
       if (this.undoStack.length > HISTORY_LIMIT) {

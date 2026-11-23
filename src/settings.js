@@ -471,7 +471,14 @@ function bind() {
     const id = await UI.guard(() => API.createStatus(name, color));
     if (id !== undefined) {
       pushHistory([
-        { kind: 'status', op: 'create', id, before: null, after: { name, color } }
+        {
+          kind: 'status',
+          op: 'create',
+          id,
+          replacementId: Number(state.settings.default_status_id),
+          before: null,
+          after: { name, color }
+        }
       ]);
     }
     dom.newStatusName.value = '';

@@ -49,6 +49,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - [x] 綁定 `Ctrl+Z`／`Ctrl+Y`，與既有 `Ctrl+N` 的 keydown 處理共存
 - [x] 輸入框內的原生 undo 與全域歷程的衝突處理
 - [x] 歷程為空或已到底時的回饋
+- [x] 以 flow 測試驗證 undo／redo 的實際行為，並反證該測試抓得到原本的失效
 
 ### task 執行（查詢條件）
 
@@ -74,6 +75,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - [x] sprint 基準的三個設定記成同一筆歷程項
 - [x] 設定視窗與主視窗的歷程串接（push／undo／redo／clear／changed 五個 event）
 - [x] 新增請假後回查 id，因為 `save_leave` 不回傳 id
+- [x] 以 flow 測試驗證設定視窗的 11 個 push 與快捷鍵轉送
 
 ### goal 空結果也能新增工單
 
@@ -184,6 +186,16 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - `users.is_active` 看起來像軟刪，其實不是：它由 `update_user` 維護（`src-tauri/src/store.rs:115`）代表「停用」，而 `delete_user` 是真刪。而且前端目前沒有任何 UI 在切換它，`settings.js:89`、`:100` 都只是把原值傳回去。
 - 規格的「加 state 標記而非刪除」在現有機制內就做得到，不必改 schema：`statuses` 是使用者可自訂的表（`create_status`），而狀態變更走 `API.setEntryStatus`／`saveEntry` 這條值修改的路徑（`src/app.js:220`、`:199`），本來就落在歷程範圍內。
 - 規格的「工時統計不因 state 過濾」與程式現況一致：`filled` 的查詢是 `SELECT work_date, SUM(hours) FROM entries WHERE user_id = ? AND work_date BETWEEN ? AND ?`，不帶任何狀態條件（`src-tauri/src/store.rs:672`），與 task 002 定案的「全部狀態都計入已填時數」同一個設計。不要當成缺陷去修。
+
+### 首次實測失效的兩個根因
+
+使用者實測回報五條失效：改工單號、改狀態、改起訖日的 `Ctrl+Z` 都沒反應；連續切換範圍後 `Ctrl+Z` 跳到不相干的範圍；`Ctrl+Y` 沒有可還原的動作。追出來只有兩個根因。
+
+- **guard 存成編輯前的 `updated_at`**：`saveEntry` 寫入當下就會更新 `updated_at`，所以 undo 時拿「編輯後的現值」比對「編輯前的 guard」永遠不相等，一律判定衝突而放棄。改成寫入**後**再取一次當 guard，且每次套用完重新 stamp（undo 本身也會更新它）。對應失效第 1、2 條。
+- **`applyingHistory` 旗標在 `reloadSettings()` 之前就放掉**：`finally` 先把旗標設回 false，才 `await reloadSettings()` → `refresh()` → `rememberFilter()`。此時 `state.settings` 剛被 bootstrap 換成資料庫裡的舊 `last_filter`，與 undo 後的快照不同，於是又 push 一筆。後果有二：歷程被污染，下一次 `Ctrl+Z` 取到錯的項目；而 `History.push` 會清空 redoStack，導致 `Ctrl+Y` 失效。把 `reloadSettings()` 移進 `try` 即可。對應失效第 3、4、5 條。
+- 補驗證時又抓到第三個缺陷：新增狀態的歷程項沒帶 `replacementId`，undo（刪掉剛建的狀態）會送出 `deleteStatus(id, undefined)`，而 Rust 端收的是 `i64`，必定失敗。改成 push 當下帶入 `default_status_id`。
+- 寫測試時踩到的 vm 陷阱：`history.js` 的 `Bridge`、`History` 都是 `const`，活在 vm 的**詞法環境**裡，覆寫 sandbox 的同名屬性蓋不掉它。要攔截跨視窗事件得 stub 更底層的 `window.__TAURI__.event`，這樣測到的也才是真正的 `Bridge`。
+- 教訓：只做語法檢查與 `history.js` 的單元測試不足以證明功能可用，主線流程要有實際跑過的驗證。`.odin/tmp/check_undo_flow.js` 用 vm 載入真正的 `app.js`、stub 掉 DOM 與 API，重跑這五條流程；並以「把修正改回去會讓測試失敗」反證過它抓得到這兩個根因。
 
 ### 空結果無法新增工單的兩個根因
 

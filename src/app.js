@@ -226,7 +226,13 @@ function buildDisplayRow(entry) {
     if (!state.applyingHistory && before !== after) {
       History.push({
         changes: [
-          { kind: 'entryStatus', id: entry.id, guard: entry.updated_at, before, after }
+          {
+            kind: 'entryStatus',
+            id: entry.id,
+            guard: await currentGuard(entry.id),
+            before,
+            after
+          }
         ]
       });
     }
@@ -485,7 +491,6 @@ async function saveSelected() {
 
   const previous = state.entries.find((item) => item.id === payload.id);
   const before = previous ? entryInputOf(previous) : null;
-  const guard = previous ? previous.updated_at : null;
 
   const id = await UI.guard(() => API.saveEntry(payload));
   if (id === undefined) {
@@ -494,7 +499,9 @@ async function saveSelected() {
 
   if (before && !state.applyingHistory && JSON.stringify(before) !== JSON.stringify(payload)) {
     History.push({
-      changes: [{ kind: 'entry', id, guard, before, after: { ...payload } }]
+      changes: [
+        { kind: 'entry', id, guard: await currentGuard(id), before, after: { ...payload } }
+      ]
     });
   }
 
@@ -876,12 +883,16 @@ function applyFilterSnapshot(snapshot) {
   renderStatusChecks();
 }
 
+async function currentGuard(id) {
+  const detail = await UI.guard(() => API.entryDetail(id));
+  return detail ? detail.entry.updated_at : null;
+}
+
 async function entryUnchanged(change) {
   if (!change.guard) {
     return true;
   }
-  const detail = await UI.guard(() => API.entryDetail(change.id));
-  return Boolean(detail) && detail.entry.updated_at === change.guard;
+  return (await currentGuard(change.id)) === change.guard;
 }
 
 async function applyChange(change, side) {
@@ -897,6 +908,7 @@ async function applyChange(change, side) {
         return false;
       }
       await UI.guard(() => API.saveEntry(value));
+      change.guard = await currentGuard(change.id);
       return true;
 
     case 'entryStatus':
@@ -904,6 +916,7 @@ async function applyChange(change, side) {
         return false;
       }
       await UI.guard(() => API.setEntryStatus(change.id, value));
+      change.guard = await currentGuard(change.id);
       return true;
 
     case 'entryCreate':
@@ -1003,11 +1016,11 @@ async function applyHistoryItem(item, side) {
         conflict = true;
       }
     }
+    await reloadSettings();
   } finally {
     state.applyingHistory = false;
   }
 
-  await reloadSettings();
   await Bridge.send('settings', HISTORY_EVENT.changed);
 
   if (conflict) {
