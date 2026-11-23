@@ -109,7 +109,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 歷程的對外行為：
 
 - `Ctrl+Z` 復原上一步，`Ctrl+Y` 還原復原。主視窗與設定視窗按下都有效，共用同一條歷程。
-- 焦點在輸入框或文字區域時，`Ctrl+Z` 歸該欄位的原生還原，不走歷程；離開欄位後才由歷程接手。
+- 焦點在**文字類**輸入時（`text`／`search`／`url`／`tel`／`email`／`password`／`number`，以及 `textarea`），`Ctrl+Z` 歸該欄位的原生還原；離開欄位後才由歷程接手。日期、顏色、核取方塊、下拉選單等非文字輸入仍走全域歷程。
 - 查詢條件的一連串調整算一步：連續調整篩選後按一次 `Ctrl+Z`，整組條件回到調整前的狀態。
 - 新增紀錄可以復原：`Ctrl+Z` 移除剛建的那筆，`Ctrl+Y` 重新建立。
 - 刪除不可復原，且刪除發生時整條歷程清空。
@@ -194,6 +194,7 @@ ai，你做你的工作，別刪我的 CurrentJob，這是使用者的 local pro
 - **guard 存成編輯前的 `updated_at`**：`saveEntry` 寫入當下就會更新 `updated_at`，所以 undo 時拿「編輯後的現值」比對「編輯前的 guard」永遠不相等，一律判定衝突而放棄。改成寫入**後**再取一次當 guard，且每次套用完重新 stamp（undo 本身也會更新它）。對應失效第 1、2 條。
 - **`applyingHistory` 旗標在 `reloadSettings()` 之前就放掉**：`finally` 先把旗標設回 false，才 `await reloadSettings()` → `refresh()` → `rememberFilter()`。此時 `state.settings` 剛被 bootstrap 換成資料庫裡的舊 `last_filter`，與 undo 後的快照不同，於是又 push 一筆。後果有二：歷程被污染，下一次 `Ctrl+Z` 取到錯的項目；而 `History.push` 會清空 redoStack，導致 `Ctrl+Y` 失效。把 `reloadSettings()` 移進 `try` 即可。對應失效第 3、4、5 條。
 - 補驗證時又抓到第三個缺陷：新增狀態的歷程項沒帶 `replacementId`，undo（刪掉剛建的狀態）會送出 `deleteStatus(id, undefined)`，而 Rust 端收的是 `i64`，必定失敗。改成 push 當下帶入 `default_status_id`。
+- 第四個缺陷，實機才看得到：改完起訖日後焦點還停在日期欄，而 `historyShortcut` 原本看到 `tagName === 'INPUT'` 就一律讓給原生 undo。`<input type="date">` 的 tagName 正是 `INPUT`，於是 `Ctrl+Z` 被讓掉、而 date input 的原生 undo 幾乎不做事，表現就是「完全沒反應」。自動測試一直用 `tagName: 'DIV'` 當焦點，剛好繞開這個情境。改成只有文字類輸入才讓給原生。
 - 寫測試時踩到的 vm 陷阱：`history.js` 的 `Bridge`、`History` 都是 `const`，活在 vm 的**詞法環境**裡，覆寫 sandbox 的同名屬性蓋不掉它。要攔截跨視窗事件得 stub 更底層的 `window.__TAURI__.event`，這樣測到的也才是真正的 `Bridge`。
 - 教訓：只做語法檢查與 `history.js` 的單元測試不足以證明功能可用，主線流程要有實際跑過的驗證。`.odin/tmp/check_undo_flow.js` 用 vm 載入真正的 `app.js`、stub 掉 DOM 與 API，重跑這五條流程；並以「把修正改回去會讓測試失敗」反證過它抓得到這兩個根因。
 

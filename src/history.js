@@ -105,6 +105,19 @@ const Bridge = {
   }
 };
 
+const TEXT_INPUT_TYPES = ['text', 'search', 'url', 'tel', 'email', 'password', 'number'];
+
+function editingText(node) {
+  const tag = node && node.tagName ? node.tagName.toLowerCase() : '';
+  if (tag === 'textarea') {
+    return true;
+  }
+  if (tag !== 'input') {
+    return false;
+  }
+  return TEXT_INPUT_TYPES.includes((node.type || 'text').toLowerCase());
+}
+
 function historyShortcut(event) {
   if (!event.ctrlKey || event.altKey) {
     return null;
@@ -113,9 +126,7 @@ function historyShortcut(event) {
   if (key !== 'z' && key !== 'y') {
     return null;
   }
-  const node = event.target;
-  const tag = node && node.tagName ? node.tagName.toLowerCase() : '';
-  if (tag === 'input' || tag === 'textarea') {
+  if (editingText(event.target)) {
     return null;
   }
   if (key === 'y' || event.shiftKey) {
