@@ -198,6 +198,8 @@ cargo test -- --nocapture  讓 println! 的輸出顯示出來
 
 2. 備份既有 db。來源是 exe 同目錄的 `src-tauri/target/release/worklog.db`，備份放 repo 根目錄的 `.odin/tmp/`，檔名帶時間戳。
 
+   **這一步要等第 1 步確認完才做，兩步不能顛倒、也不要平行跑。** app 還活著的時候備份，它隨後還會寫 `last_filter`、`window_layout` 這類設定，備份就不是發布前的最終狀態，第 4 步的比對一定不一致。
+
    ```powershell
    Copy-Item src-tauri\target\release\worklog.db ".odin\tmp\worklog.db.backup-$(Get-Date -Format yyyyMMdd-HHmmss)"
    ```
